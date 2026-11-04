@@ -1,0 +1,17 @@
+# Android Studio
+.idea/
+*.iml
+.gradle/
+build/
+**/build/
+local.properties
+
+# Signing and secrets
+*.jks
+*.keystore
+keystore.properties
+secrets.properties
+
+# macOS
+.DS_Store
+
