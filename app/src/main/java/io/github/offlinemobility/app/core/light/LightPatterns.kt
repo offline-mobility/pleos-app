@@ -14,10 +14,55 @@ enum class Lamp(val label: String) {
 /** Mirrors the vehicle SDK switch values so the original state can be restored exactly. */
 enum class LampSwitch { OFF, ON, DAYTIME_RUNNING, AUTOMATIC }
 
-enum class LampGroup(val label: String, val lamps: List<Lamp>) {
-    FRONT("전방", listOf(Lamp.HIGH_BEAM)),
-    REAR("후방", listOf(Lamp.REAR_FOG)),
-    FRONT_AND_REAR("전후방", listOf(Lamp.HIGH_BEAM, Lamp.REAR_FOG)),
+enum class LampGroup(val label: String) {
+    FRONT("전방"),
+    REAR("후방"),
+    FRONT_AND_REAR("전후방"),
+}
+
+/** Which lamps flash with the pattern and which are held on underneath. */
+data class LightPlan(val flash: List<Lamp>, val steady: List<Lamp>) {
+    val isEmpty: Boolean get() = flash.isEmpty()
+}
+
+/**
+ * Chooses lamps from what the vehicle can actually switch.
+ *
+ * Tail lamp and low beam share one headlamp switch (Off / Position / Low beam) on most cars, so the
+ * tail lamp cannot flash while the low beam is held on. Most cars also light the high beam only
+ * when the low beam is on.
+ * - Rear fog available: flash high beam (front) and rear fog (rear), hold the low beam on.
+ * - No rear fog: flash low beam together with high beam; the tail lamps follow the low beam,
+ *   so the rear still signals.
+ */
+object LightPlanner {
+    fun plan(group: LampGroup, writable: (Lamp) -> Boolean): LightPlan {
+        val high = writable(Lamp.HIGH_BEAM)
+        val low = writable(Lamp.LOW_BEAM)
+        val rearFog = writable(Lamp.REAR_FOG)
+        val tail = writable(Lamp.TAIL_LAMP)
+
+        fun front(): LightPlan = when {
+            high && low -> LightPlan(listOf(Lamp.HIGH_BEAM), listOf(Lamp.LOW_BEAM))
+            high -> LightPlan(listOf(Lamp.HIGH_BEAM), emptyList())
+            low -> LightPlan(listOf(Lamp.LOW_BEAM), emptyList())
+            else -> LightPlan(emptyList(), emptyList())
+        }
+
+        return when (group) {
+            LampGroup.FRONT -> front()
+            LampGroup.REAR -> when {
+                rearFog -> LightPlan(listOf(Lamp.REAR_FOG), emptyList())
+                tail -> LightPlan(listOf(Lamp.TAIL_LAMP), emptyList())
+                else -> LightPlan(emptyList(), emptyList())
+            }
+            LampGroup.FRONT_AND_REAR -> when {
+                rearFog -> front().let { it.copy(flash = it.flash + Lamp.REAR_FOG) }
+                low -> LightPlan(listOfNotNull(Lamp.LOW_BEAM, Lamp.HIGH_BEAM.takeIf { high }), emptyList())
+                else -> front()
+            }
+        }
+    }
 }
 
 data class LightStep(val on: Boolean, val durationMs: Long)

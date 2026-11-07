@@ -3,6 +3,7 @@ package io.github.offlinemobility.app.vehicle
 import ai.pleos.playground.vehicle.Vehicle
 import ai.pleos.playground.vehicle.api.model.capability.AccessType
 import ai.pleos.playground.vehicle.api.model.capability.CapabilityConfig
+import ai.pleos.playground.vehicle.constant.control.LightState
 import ai.pleos.playground.vehicle.constant.control.LightSwitch
 import ai.pleos.playground.vehicle.constant.control.VehicleGear
 import ai.pleos.playground.vehicle.listener.GearSelectionListener
@@ -98,6 +99,17 @@ class PleosVehicleGateway(context: Context) : VehicleGateway {
             Lamp.TAIL_LAMP -> light.setTailLampLightSwitch(target, done, fail)
         }
     }.map { }
+
+    override suspend fun isLampLit(lamp: Lamp): Result<Boolean> = call<LightState> { done, fail ->
+        val light = vehicle.getLight()
+        when (lamp) {
+            Lamp.HIGH_BEAM -> light.getCurrentHighBeamLightState(done, fail)
+            Lamp.LOW_BEAM -> light.getCurrentLowBeamLightState(done, fail)
+            Lamp.REAR_FOG -> light.getCurrentRearFogLightState(done, fail)
+            Lamp.FRONT_FOG -> light.getCurrentFrontFogLightState(done, fail)
+            Lamp.TAIL_LAMP -> light.getCurrentTailLampLightState(done, fail)
+        }
+    }.map { it == LightState.ON || it == LightState.DAYTIME_RUNNING }
 
     override fun release() {
         if (!initialized) return

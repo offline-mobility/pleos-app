@@ -46,10 +46,12 @@
 - 수신 차량은 마이크로 받아 화면에 문장으로 띄운다. 사람이 신호를 해석할 필요가 없다.
 - 오류 정정(Reed-Solomon)과 오류 검출(CRC)을 넣어, 소음 속에서도 잘못된 메시지가 표시되지 않는다.
 
-**② 표준 조난 점멸 — 상향등·후방 안개등**
+**② 표준 조난 점멸 — 차량이 지원하는 외부 조명 자동 선택**
 - 위급 메시지는 SOS 점멸을 쓴다. 시간 간격은 미국 해안경비대 전자 조난등 기준(46 CFR 161.013-7)을 따른다.
 - 일반 메시지는 국제 산악 조난 신호(분당 6회)를 쓰고, 응답은 분당 3회로 보낸다.
 - 구조대가 접근하면 이중 점멸로 정확한 차량 위치를 알린다.
+- 차량마다 제어 가능한 조명이 다르므로 Capability API로 확인해 조명을 고른다. 후방 안개등이 있으면 상향등과 후방 안개등을 점멸하고, 하향등은 켜둔다. 없으면 하향등과 상향등을 함께 점멸한다. 하향등이 켜질 때 미등도 같이 켜져 뒤쪽에도 신호가 간다.
+- 점멸 명령을 보낸 뒤 실제 점등 상태를 다시 읽어 확인한다. 신호가 끝나면 모든 조명을 원래 상태로 되돌린다.
 - 앱이 없는 사람이나 헬기, 드론도 알아볼 수 있는 국제 관례를 따른다. 일정한 1~2Hz 점멸은 비상등으로 오인되므로 쓰지 않는다.
 
 **③ 차량 간 중계 — 정차 차량 행렬이 통신망이 된다**
@@ -134,14 +136,29 @@
 |---|---|---|
 | 조명 지원 여부 | `Light.check{HighBeam,RearFog,…}LightSwitchCapabilities` | `CAR_LIGHTS` |
 | 원래 조명 상태 저장 | `Light.get{HighBeam,RearFog}LightSwitch` | `CAR_LIGHTS` |
-| 조난 점멸 | `Light.set{HighBeam,RearFog}LightSwitch(ON/OFF)` | `CONTROL_CAR_LIGHTS` (App Market 사전 승인 대상) |
+| 조난 점멸 | `Light.set{HighBeam,LowBeam,RearFog,TailLamp}LightSwitch(ON/OFF)` | `CONTROL_CAR_LIGHTS` (App Market 사전 승인 대상) |
+| 실제 점등 확인 | `Light.getCurrent{HighBeam,LowBeam,RearFog,TailLamp}LightState` | `CAR_LIGHTS` |
 | 정차 확인 | `Gear.getCurrentGearSelectionState`, `registerGearSelection` | `CAR_DRIVE` |
 | 소리 송신 | Android `AudioTrack`, 오디오 포커스 요청·반납 | — |
 | 소리 수신 | Android `AudioRecord` (UNPROCESSED 우선) | `RECORD_AUDIO` |
 
 **현재 구현 상태**
-- 완료: 음향 모뎀(송신·수신·오류 정정), 조명 패턴, 중계 정책, 안전 잠금, 등화관제 모드, Pleos Vehicle SDK 연동(Light·Gear), 차량용 화면, 단위 테스트 34개.
-- 진행: Pleos Connect Emulator와 Virtual Console에서 조명 제어 동작 확인, 실제 기기 간 음향 송수신 거리 측정, 측정값에 맞춘 변조 파라미터 조정.
+- 완료: 음향 모뎀(송신·수신·오류 정정), 조명 패턴과 차량별 조명 선택, 중계 정책, 안전 잠금, 등화관제 모드, Pleos Vehicle SDK 연동(Light·Gear), 차량용 화면, 단위 테스트 37개.
+- Pleos Connect Emulator v2.1.0 검증 결과:
+
+| 항목 | 결과 |
+|---|---|
+| Vehicle SDK 연결, 기어 조회 | 정상 (P단 표시) |
+| 조명 제어 권한 | 차량 서비스가 `CONTROL_CAR_LIGHTS` 검증 후 상향등·하향등·미등 제어 성공 |
+| 조명 지원 확인 | 에뮬레이터 차종은 후방·전방 안개등 미지원 → 하향등+상향등 점멸로 자동 전환 |
+| SOS 점멸 리듬 | Virtual Console 차량 상태에서 점 0.33초 · 문자 간격 2초 · 선 1초 · 주기 14초 확인 |
+| 안전 잠금 | 송신 중 Virtual Console에서 기어를 D로 바꾸자 같은 시각에 송신 중단, 조명 원상 복구 |
+| 조명 복구 | 신호 전 미등 켜짐 상태 → 신호 후 미등 켜짐 상태로 복구 |
+| 음향 수신 | 합성한 타 차량 신호를 앱 수신기로 해독 (SNR 36dB, 오류 0) |
+| 오디오 출력 | 차량 오디오 포커스(USAGE_ALARM) 획득 |
+
+- 에뮬레이터에서 확인할 수 없는 항목: 상향등 실제 점등은 에뮬레이터에 차량 제어기 모델이 없어 스위치 명령 수락까지만 확인된다. 실제 기기 간 음향 전달 거리는 별도로 측정한다.
+- 진행: 실제 기기 간 음향 송수신 거리 측정, 측정값에 맞춘 변조 파라미터 조정.
 - 운용 조건: 차량 전원(ACC 이상)이 켜져 있어야 한다. 차량 간 거리가 멀면 창문을 조금 열어야 수신 거리가 늘어난다. 차체 차음이 25~35dB에 이르기 때문이다.
 - 2차 PT까지: 시나리오 A·B 시연 영상, 연료·배터리 잔량 기반 신호 지속 시간 예측, 수신 메시지 음성 안내, 평시 점검·훈련 모드.
 

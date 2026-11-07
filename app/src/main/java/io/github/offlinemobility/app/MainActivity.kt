@@ -146,9 +146,9 @@ private class ScreenActions(
 
 @Composable
 private fun MainScreen(state: UiState, actions: ScreenActions) {
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
+    Column(Modifier.fillMaxSize().padding(20.dp)) {
         StatusBar(state, actions)
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(16.dp))
         BoxWithConstraints(Modifier.fillMaxSize()) {
             if (maxWidth > maxHeight) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -168,7 +168,7 @@ private fun MainScreen(state: UiState, actions: ScreenActions) {
 @Composable
 private fun StatusBar(state: UiState, actions: ScreenActions) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Offline Mobility", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text("Offline Mobility", fontSize = 28.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.width(4.dp))
         val vehicleColor = when (state.vehicleMode) {
             VehicleMode.PLEOS -> Palette.accent
@@ -203,10 +203,10 @@ private fun StatusBar(state: UiState, actions: ScreenActions) {
 @Composable
 private fun ComposePanel(state: UiState, actions: ScreenActions, modifier: Modifier) {
     Panel(modifier) {
-        Text("보낼 메시지", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(8.dp))
+        Text("보낼 메시지", fontSize = 21.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(11.dp))
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 150.dp),
+            columns = GridCells.Adaptive(minSize = 220.dp),
             modifier = Modifier.weight(1f),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -217,11 +217,11 @@ private fun ComposePanel(state: UiState, actions: ScreenActions, modifier: Modif
                 }
             }
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(14.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("인원", fontSize = 15.sp)
+            Text("인원", fontSize = 21.sp)
             SmallButton("−") { actions.people(-1) }
-            Text(if (state.people == 0) "미상" else if (state.people >= 15) "15+" else "${state.people}명", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(if (state.people == 0) "미상" else if (state.people >= 15) "15+" else "${state.people}명", fontSize = 25.sp, fontWeight = FontWeight.Bold)
             SmallButton("+") { actions.people(1) }
             Spacer(Modifier.width(8.dp))
             Toggle("소리", state.useSound, actions.toggleSound)
@@ -229,32 +229,35 @@ private fun ComposePanel(state: UiState, actions: ScreenActions, modifier: Modif
             Toggle("등화관제", state.blackout, actions.toggleBlackout)
         }
         if (state.blackout) {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(11.dp))
             Text(
                 "등화관제 중 · 외부 조명 신호를 쓰지 않습니다 (민방공 야간 공습경보 행동요령)",
-                fontSize = 13.sp,
+                fontSize = 18.sp,
                 color = Palette.warn,
             )
         } else if (state.useLight) {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(11.dp))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 LampGroup.entries.forEach { group ->
                     Toggle(group.label, state.lampGroup == group) { actions.lampGroup(group) }
                 }
-                val unsupported = state.lampGroup.lamps.filter {
-                    state.lampSupport[it] != null && state.lampSupport[it] != LampSupport.WRITABLE
+                val plan = state.lightPlan
+                val label = when {
+                    plan.isEmpty -> "이 차량은 신호용 조명을 제어할 수 없습니다"
+                    plan.steady.isEmpty() -> "점멸: ${plan.flash.joinToString { it.label }} · ${state.lightPattern.title}"
+                    else -> "점멸: ${plan.flash.joinToString { it.label }} · 유지: ${plan.steady.joinToString { it.label }}"
                 }
+                val dropped = plan.isEmpty
                 Text(
-                    text = if (unsupported.isEmpty()) state.lightPattern.title
-                    else unsupported.joinToString { "${it.label} ${state.lampSupport[it]?.label}" },
-                    fontSize = 13.sp,
-                    color = if (unsupported.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else Palette.warn,
+                    text = label,
+                    fontSize = 18.sp,
+                    color = if (!dropped) MaterialTheme.colorScheme.onSurfaceVariant else Palette.warn,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(14.dp))
         TransmitBar(state, actions)
     }
 }
@@ -268,27 +271,27 @@ private fun TransmitBar(state: UiState, actions: ScreenActions) {
         Spacer(Modifier.height(6.dp))
         Button(
             onClick = actions.stop,
-            modifier = Modifier.fillMaxWidth().height(64.dp),
+            modifier = Modifier.fillMaxWidth().height(86.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Palette.critical),
-        ) { Text("송신 중단", fontSize = 20.sp, fontWeight = FontWeight.Bold) }
+        ) { Text("송신 중단", fontSize = 28.sp, fontWeight = FontWeight.Bold) }
     } else {
         val reason = state.safety.reasons.firstOrNull()
-            ?: if (!state.useSound && !state.lightEnabled) "소리 또는 빛을 하나 이상 선택하세요" else null
+            ?: if (!state.useSound && !state.lightUsable) "소리 또는 빛을 하나 이상 선택하세요" else null
         Text(
             text = reason ?: tx.lastResult ?: "정차(P단) 상태에서만 송신됩니다",
-            fontSize = 13.sp,
+            fontSize = 18.sp,
             color = if (reason != null) Palette.critical else MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(6.dp))
         Button(
             onClick = actions.transmit,
             enabled = state.canTransmit,
-            modifier = Modifier.fillMaxWidth().height(64.dp),
+            modifier = Modifier.fillMaxWidth().height(86.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = if (state.selected.critical) Palette.critical else Palette.accent,
             ),
         ) {
-            Text("${state.selected.title} 보내기", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("${state.selected.title} 보내기", fontSize = 28.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -297,16 +300,16 @@ private fun TransmitBar(state: UiState, actions: ScreenActions) {
 private fun InboxPanel(state: UiState, actions: ScreenActions, modifier: Modifier) {
     Panel(modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("받은 신호", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("받은 신호", fontSize = 21.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.weight(1f))
             Toggle("자동 중계", state.autoRelay, actions.toggleRelay)
             Spacer(Modifier.width(6.dp))
             Toggle("가상 수신", false, actions.simulateIncoming)
         }
         state.micMessage?.let {
-            Text(it, fontSize = 13.sp, color = Palette.warn, modifier = Modifier.padding(top = 6.dp))
+            Text(it, fontSize = 18.sp, color = Palette.warn, modifier = Modifier.padding(top = 6.dp))
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(11.dp))
         if (state.inbox.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
@@ -337,12 +340,12 @@ private fun InboxRow(item: InboxItem, canAck: Boolean, onAck: () -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 if (item.kind == InboxKind.ECHO) "내 신호 중계 확인 · ${f.message.title}" else f.message.title,
-                fontSize = 18.sp,
+                fontSize = 25.sp,
                 fontWeight = FontWeight.Bold,
                 color = color,
                 modifier = Modifier.weight(1f),
             )
-            Text(timeFormat.format(Date(item.receivedAtMs)), fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+            Text(timeFormat.format(Date(item.receivedAtMs)), fontSize = 18.sp, fontFamily = FontFamily.Monospace)
         }
         val people = when (f.people) { 0 -> "인원 미상"; 15 -> "15명 이상"; else -> "${f.people}명" }
         val route = if (f.hop == 0) "직접 수신" else "${f.hop}대 거쳐 중계"
@@ -355,11 +358,11 @@ private fun InboxRow(item: InboxItem, canAck: Boolean, onAck: () -> Unit) {
             if (item.correctedSymbols > 0) add("오류 ${item.correctedSymbols}개 정정")
             if (item.relayState.label.isNotEmpty()) add(item.relayState.label)
         }
-        Text(extra.joinToString(" · "), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(extra.joinToString(" · "), fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (item.kind == InboxKind.NEW && f.message != RescueMessage.ACK) {
             Spacer(Modifier.height(6.dp))
-            OutlinedButton(onClick = onAck, enabled = canAck, modifier = Modifier.heightIn(min = 48.dp)) {
-                Text("수신 확인 보내기")
+            OutlinedButton(onClick = onAck, enabled = canAck, modifier = Modifier.heightIn(min = 65.dp)) {
+                Text("수신 확인 보내기", fontSize = 18.sp)
             }
         }
     }
@@ -369,14 +372,14 @@ private fun InboxRow(item: InboxItem, canAck: Boolean, onAck: () -> Unit) {
 private fun MessageTile(message: RescueMessage, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val color = if (message.critical) Palette.critical else Palette.accent
     Box(
-        Modifier.fillMaxWidth().heightIn(min = 60.dp).clip(RoundedCornerShape(12.dp))
+        Modifier.fillMaxWidth().heightIn(min = 81.dp).clip(RoundedCornerShape(12.dp))
             .background(if (selected) color.copy(alpha = 0.22f) else Color.Transparent)
             .border(if (selected) 2.dp else 1.dp, if (selected) color else Palette.line, RoundedCornerShape(12.dp))
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
-        Text(message.title, fontSize = 16.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
+        Text(message.title, fontSize = 22.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
     }
 }
 
@@ -394,9 +397,9 @@ private fun Chip(text: String, color: Color, onClick: (() -> Unit)? = null) {
     Box(
         Modifier.clip(RoundedCornerShape(50)).border(1.dp, color, RoundedCornerShape(50))
             .let { if (onClick != null) it.clickable(onClick = onClick) else it }
-            .heightIn(min = 36.dp).padding(horizontal = 12.dp, vertical = 6.dp),
+            .heightIn(min = 49.dp).padding(horizontal = 12.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
-    ) { Text(text, color = color, fontSize = 14.sp, fontWeight = FontWeight.Medium) }
+    ) { Text(text, color = color, fontSize = 20.sp, fontWeight = FontWeight.Medium) }
 }
 
 @Composable
@@ -405,31 +408,31 @@ private fun Toggle(text: String, on: Boolean, onClick: () -> Unit) {
     Box(
         Modifier.clip(RoundedCornerShape(10.dp)).background(if (on) color.copy(alpha = 0.18f) else Color.Transparent)
             .border(1.dp, color, RoundedCornerShape(10.dp)).clickable(onClick = onClick)
-            .heightIn(min = 44.dp).padding(horizontal = 14.dp, vertical = 10.dp),
+            .heightIn(min = 59.dp).padding(horizontal = 14.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center,
-    ) { Text(text, color = color, fontSize = 14.sp, fontWeight = FontWeight.Medium) }
+    ) { Text(text, color = color, fontSize = 20.sp, fontWeight = FontWeight.Medium) }
 }
 
 @Composable
 private fun SmallButton(text: String, onClick: () -> Unit) {
     Box(
-        Modifier.size(44.dp).clip(CircleShape).border(1.dp, Palette.line, CircleShape).clickable(onClick = onClick),
+        Modifier.size(59.dp).clip(CircleShape).border(1.dp, Palette.line, CircleShape).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Text(text, fontSize = 20.sp) }
+    ) { Text(text, fontSize = 28.sp) }
 }
 
 @Composable
 private fun Progress(label: String, value: Float, color: Color) {
     Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-        Text(label, fontSize = 13.sp, color = color)
+        Text(label, fontSize = 18.sp, color = color)
         LinearProgressIndicator(progress = { value }, color = color, modifier = Modifier.fillMaxWidth().height(6.dp))
     }
 }
 
 @Composable
-private fun LevelMeter(db: Float, active: Boolean, width: Dp = 64.dp) {
+private fun LevelMeter(db: Float, active: Boolean, width: Dp = 96.dp) {
     val fraction = ((db + 80f) / 70f).coerceIn(0f, 1f)
-    Box(Modifier.width(width).height(8.dp).clip(RoundedCornerShape(4.dp)).background(Palette.line)) {
+    Box(Modifier.width(width).height(11.dp).clip(RoundedCornerShape(4.dp)).background(Palette.line)) {
         Box(
             Modifier.fillMaxHeight().fillMaxWidth(if (active) fraction else 0f)
                 .background(if (fraction > 0.8f) Palette.warn else Palette.accent),

@@ -1,6 +1,7 @@
 package io.github.offlinemobility.app
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.offlinemobility.app.audio.AcousticReceiver
@@ -11,6 +12,8 @@ import io.github.offlinemobility.app.core.acoustic.ModemConfig
 import io.github.offlinemobility.app.core.light.Lamp
 import io.github.offlinemobility.app.core.light.LampGroup
 import io.github.offlinemobility.app.core.light.LightPattern
+import io.github.offlinemobility.app.core.light.LightPlan
+import io.github.offlinemobility.app.core.light.LightPlanner
 import io.github.offlinemobility.app.core.light.LightPatterns
 import io.github.offlinemobility.app.core.protocol.RescueFrame
 import io.github.offlinemobility.app.core.protocol.RescueMessage
@@ -97,8 +100,13 @@ data class UiState(
     val safety: SafetyVerdict
         get() = SafetyGate.evaluate(VehicleSafetyState(gear), if (useLight) TransmitChannel.LIGHT else TransmitChannel.SOUND)
     val lightPattern: LightPattern get() = LightPatterns.forMessage(selected)
+    /** Lamps used for the selected group, chosen from what this vehicle reports as writable. */
+    val lightPlan: LightPlan
+        get() = LightPlanner.plan(lampGroup) { lampSupport[it] == null || lampSupport[it] == LampSupport.WRITABLE }
+
     val lightEnabled: Boolean get() = useLight && !blackout
-    val canTransmit: Boolean get() = safety.allowed && (useSound || lightEnabled) && !tx.active
+    val lightUsable: Boolean get() = lightEnabled && !lightPlan.isEmpty
+    val canTransmit: Boolean get() = safety.allowed && (useSound || lightUsable) && !tx.active
 }
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -142,11 +150,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             gearJob = launch { gateway.gear.collect(::onGear) }
 
             val support = Lamp.entries.associateWith { gateway.lampSupport(it) }
+            Log.i(TAG, "vehicle mode=$mode ${result.exceptionOrNull()?.message ?: ""} lamps=$support")
             _state.update { it.copy(lampSupport = support) }
         }
     }
 
     private fun onGear(gear: GearState) {
+        Log.i(TAG, "gear=$gear")
         _state.update { it.copy(gear = gear) }
         // Leaving P stops every outgoing signal immediately; lamps are restored by the runner.
         if (gear != GearState.PARK) stopTransmission("P단 해제로 송신을 중단했습니다")
@@ -199,10 +209,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!s.canTransmit) return
         sequence = (sequence + 1) % 16
         val frame = RescueFrame(s.selected, s.people, senderId, sequence)
+        Log.i(TAG, "transmit $frame sound=${s.useSound} light=${s.lightUsable} plan=${s.lightPlan}")
         relayPolicy.markSent(frame, System.currentTimeMillis())
         _state.update { it.copy(tx = TxState(lastFrame = frame)) }
         if (s.useSound) sendSound(frame, repeats = SOUND_REPEATS)
-        if (s.lightEnabled) sendLight(s.lightPattern, s.lampGroup.lamps)
+        if (s.lightUsable) sendLight(s.lightPattern, s.lightPlan)
     }
 
     fun acknowledge(item: InboxItem) {
@@ -212,11 +223,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         relayPolicy.markSent(ack, System.currentTimeMillis())
         _state.update { it.copy(tx = TxState(lastFrame = ack)) }
         sendSound(ack, repeats = 2)
-        if (_state.value.lightEnabled) sendLight(LightPatterns.REPLY, _state.value.lampGroup.lamps)
+        if (_state.value.lightUsable) sendLight(LightPatterns.REPLY, _state.value.lightPlan)
     }
 
     fun stopTransmission(reason: String = "송신을 중단했습니다") {
         val wasActive = _state.value.tx.active
+        if (wasActive) Log.i(TAG, "stop: $reason")
         soundJob?.cancel()
         lightJob?.cancel()
         if (wasActive) {
@@ -235,6 +247,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val result = transmitter.play(audio, config.sampleRate)
                 if (result.isFailure) {
                     error = result.exceptionOrNull()?.message
+                    Log.w(TAG, "sound failed: $error")
                     break
                 }
                 _state.update { it.copy(tx = it.tx.copy(soundProgress = (i + 1f) / repeats)) }
@@ -251,23 +264,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun sendLight(pattern: LightPattern, lamps: List<Lamp>) {
+    private fun sendLight(pattern: LightPattern, plan: LightPlan) {
         val runner = LightSignalRunner(gateway)
         lightJob = viewModelScope.launch {
             _state.update { it.copy(tx = it.tx.copy(lightActive = true, lightPattern = pattern, lightProgress = 0f)) }
-            val report = runner.run(pattern, lamps) { step, total, on ->
+            val report = runner.run(pattern, plan.flash, plan.steady) { step, total, on ->
                 _state.update { it.copy(tx = it.tx.copy(lightProgress = step.toFloat() / total, lightOn = on)) }
             }
+            Log.i(TAG, "light report $report")
+            val confirmed = report.litConfirmed.filterValues { it == true }.keys
+            val unconfirmed = report.litConfirmed.filterValues { it != true }.keys
+            val litText = buildList {
+                if (confirmed.isNotEmpty()) add("점등 확인 ${confirmed.joinToString { it.label }}")
+                if (unconfirmed.isNotEmpty()) add("점등 미확인 ${unconfirmed.joinToString { it.label }}")
+            }.joinToString(" · ")
             val summary = if (report.failures == 0) {
-                "${pattern.title} 완료 · 평균 전환 ${report.averageSwitchLatencyMs}ms"
+                "${pattern.title} 완료 · 평균 전환 ${report.averageSwitchLatencyMs}ms · $litText"
             } else {
-                "조명 제어 실패 ${report.failures}회 · ${report.lastError ?: "원인 미상"}"
+                "조명 제어 실패 ${report.failures}회 · 차량이 이 조명 제어를 허용하지 않습니다"
             }
             _state.update { it.copy(tx = it.tx.copy(lightActive = false, lightOn = false, lastResult = summary)) }
         }
     }
 
     private fun onDecoded(signal: DecodedSignal) {
+        Log.i(TAG, "decoded ${signal.frame} snr=${"%.1f".format(signal.snrDb)} corrected=${signal.correctedSymbols}")
         val now = System.currentTimeMillis()
         when (val decision = relayPolicy.onReceived(signal.frame, now)) {
             is RelayDecision.Duplicate -> bumpRepeat(decision.frame)
@@ -366,6 +387,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private companion object {
+        const val TAG = "OfflineMobility"
         const val SOUND_REPEATS = 3
         const val SOUND_GAP_MS = 400L
         const val MAX_INBOX = 30

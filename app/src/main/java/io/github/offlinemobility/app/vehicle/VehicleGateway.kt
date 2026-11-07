@@ -23,6 +23,9 @@ interface VehicleGateway {
     suspend fun lampSupport(lamp: Lamp): LampSupport
     suspend fun readLamp(lamp: Lamp): Result<LampSwitch>
     suspend fun setLamp(lamp: Lamp, value: LampSwitch): Result<Unit>
+
+    /** Actual lamp output reported by the vehicle, which can differ from the requested switch. */
+    suspend fun isLampLit(lamp: Lamp): Result<Boolean>
     fun release()
 }
 
@@ -55,6 +58,8 @@ class SimulatedVehicleGateway : VehicleGateway {
         _lampStates.value = lamps.toMap()
         return Result.success(Unit)
     }
+
+    override suspend fun isLampLit(lamp: Lamp): Result<Boolean> = Result.success(lamps.getValue(lamp) == LampSwitch.ON)
 
     override fun release() = Unit
 }
