@@ -1,30 +1,39 @@
 package io.github.offlinemobility.app
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -32,6 +41,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,10 +50,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.offlinemobility.app.core.light.LampGroup
+import io.github.offlinemobility.app.core.protocol.RescueMessage
+import io.github.offlinemobility.app.core.safety.GearState
+import io.github.offlinemobility.app.vehicle.LampSupport
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
@@ -51,185 +68,40 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme(colorScheme = offlineMobilityColors) {
-                val state by viewModel.uiState.collectAsStateWithLifecycle()
-                ChallengeScreen(
-                    state = state,
-                    onRetry = viewModel::connect,
-                    onSelectMessage = viewModel::selectMessage,
-                    onSelectChannel = viewModel::selectChannel,
-                    onToggleParked = viewModel::toggleParkedDemo,
-                    onTransmit = viewModel::transmit,
-                    onSimulateReceive = viewModel::simulateReceive,
-                )
-            }
-        }
-    }
-}
-
-private val offlineMobilityColors = darkColorScheme(
-    primary = Color(0xFF5BE7C4),
-    onPrimary = Color(0xFF03241C),
-    secondary = Color(0xFF6AB7FF),
-    background = Color(0xFF071018),
-    surface = Color(0xFF0D1923),
-    onSurface = Color(0xFFEAF2F7),
-    onSurfaceVariant = Color(0xFF9FB1BE),
-    error = Color(0xFFFF6B6B),
-)
-
-@Composable
-private fun ChallengeScreen(
-    state: MainUiState,
-    onRetry: () -> Unit,
-    onSelectMessage: (String) -> Unit,
-    onSelectChannel: (SignalChannel) -> Unit,
-    onToggleParked: () -> Unit,
-    onTransmit: () -> Unit,
-    onSimulateReceive: () -> Unit,
-) {
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background,
-    ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            Header(state = state, onRetry = onRetry, onToggleParked = onToggleParked)
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(start = 28.dp, end = 28.dp, bottom = 24.dp),
-                horizontalArrangement = Arrangement.spacedBy(20.dp),
-            ) {
-                MessagePresetPanel(
-                    modifier = Modifier.weight(1.25f),
-                    state = state,
-                    onSelectMessage = onSelectMessage,
-                )
-                SignalPanel(
-                    modifier = Modifier.weight(0.75f),
-                    state = state,
-                    onSelectChannel = onSelectChannel,
-                    onTransmit = onTransmit,
-                    onSimulateReceive = onSimulateReceive,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun Header(
-    state: MainUiState,
-    onRetry: () -> Unit,
-    onToggleParked: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 28.dp, vertical = 18.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(42.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.primary),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = "OM",
-                color = MaterialTheme.colorScheme.onPrimary,
-                fontWeight = FontWeight.Black,
-            )
-        }
-        Spacer(Modifier.width(14.dp))
-        Column {
-            Text(
-                text = "OFFLINE MOBILITY",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.5.sp,
-            )
-            Text(
-                text = "통신 두절 상황을 위한 차량 간 비상 신호",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Spacer(Modifier.weight(1f))
-        ConnectionStatus(state = state, onRetry = onRetry)
-        Spacer(Modifier.width(12.dp))
-        OutlinedButton(onClick = onToggleParked) {
-            Text(if (state.isParked) "P · 정차 데모" else "D · 주행 데모")
-        }
-    }
-}
-
-@Composable
-private fun ConnectionStatus(state: MainUiState, onRetry: () -> Unit) {
-    val statusColor = when {
-        state.isConnected -> MaterialTheme.colorScheme.primary
-        state.isConnecting -> Color(0xFFFFC857)
-        else -> MaterialTheme.colorScheme.error
-    }
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(99.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .clickable(enabled = !state.isConnecting && !state.isConnected, onClick = onRetry)
-            .padding(horizontal = 14.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .clip(RoundedCornerShape(99.dp))
-                .background(statusColor),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = state.message,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-@Composable
-private fun MessagePresetPanel(
-    modifier: Modifier,
-    state: MainUiState,
-    onSelectMessage: (String) -> Unit,
-) {
-    Panel(modifier = modifier) {
-        Text(
-            text = "보낼 메시지",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(
-            modifier = Modifier.padding(top = 3.dp, bottom = 14.dp),
-            text = "짧고 오해 없는 표준 메시지를 선택하세요.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        EmergencyProtocol.presets.chunked(2).forEach { rowMessages ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                rowMessages.forEach { message ->
-                    MessageCard(
-                        modifier = Modifier.weight(1f),
-                        message = message,
-                        isSelected = message.id == state.selectedMessageId,
-                        enabled = state.transmissionPhase != TransmissionPhase.TRANSMITTING,
-                        onClick = { onSelectMessage(message.id) },
+            MaterialTheme(colorScheme = Palette.scheme) {
+                val state by viewModel.state.collectAsStateWithLifecycle()
+                val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+                    if (granted) viewModel.startListening() else viewModel.onMicPermissionDenied()
+                }
+                LaunchedEffect(Unit) {
+                    if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                        viewModel.startListening()
+                    } else {
+                        micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                }
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    MainScreen(
+                        state = state,
+                        actions = ScreenActions(
+                            select = viewModel::select,
+                            people = viewModel::changePeople,
+                            toggleSound = viewModel::toggleSound,
+                            toggleLight = viewModel::toggleLight,
+                            lampGroup = viewModel::selectLampGroup,
+                            transmit = viewModel::transmit,
+                            stop = { viewModel.stopTransmission() },
+                            toggleListen = {
+                                if (state.listening) viewModel.stopListening()
+                                else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            },
+                            toggleRelay = viewModel::toggleAutoRelay,
+                            toggleBlackout = viewModel::toggleBlackout,
+                            simulateIncoming = viewModel::simulateIncoming,
+                            acknowledge = viewModel::acknowledge,
+                            setGear = viewModel::setSimulatedGear,
+                            retryVehicle = viewModel::connectVehicle,
+                        ),
                     )
                 }
             }
@@ -237,227 +109,330 @@ private fun MessagePresetPanel(
     }
 }
 
-@Composable
-private fun MessageCard(
-    modifier: Modifier,
-    message: EmergencyMessage,
-    isSelected: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    val priorityColor = when (message.priority) {
-        MessagePriority.CRITICAL -> MaterialTheme.colorScheme.error
-        MessagePriority.HIGH -> Color(0xFFFFC857)
-        MessagePriority.NORMAL -> MaterialTheme.colorScheme.secondary
-    }
-    val borderColor = if (isSelected) MaterialTheme.colorScheme.primary else Color(0xFF243441)
+private object Palette {
+    val critical = Color(0xFFFF5A5F)
+    val accent = Color(0xFF5BE7C4)
+    val warn = Color(0xFFFFC857)
+    val line = Color(0xFF243645)
+    val card = Color(0xFF0F1D28)
+    val scheme = darkColorScheme(
+        primary = accent,
+        onPrimary = Color(0xFF03241C),
+        secondary = Color(0xFF6AB7FF),
+        background = Color(0xFF071018),
+        surface = card,
+        onSurface = Color(0xFFEAF2F7),
+        onSurfaceVariant = Color(0xFF9FB1BE),
+        error = critical,
+    )
+}
 
-    Card(
-        modifier = modifier
-            .height(86.dp)
-            .border(1.dp, borderColor, RoundedCornerShape(14.dp))
-            .clickable(enabled = enabled, onClick = onClick),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF101F2A)),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(13.dp),
-            verticalAlignment = Alignment.Top,
+private class ScreenActions(
+    val select: (RescueMessage) -> Unit,
+    val people: (Int) -> Unit,
+    val toggleSound: () -> Unit,
+    val toggleLight: () -> Unit,
+    val lampGroup: (LampGroup) -> Unit,
+    val transmit: () -> Unit,
+    val stop: () -> Unit,
+    val toggleListen: () -> Unit,
+    val toggleRelay: () -> Unit,
+    val toggleBlackout: () -> Unit,
+    val simulateIncoming: () -> Unit,
+    val acknowledge: (InboxItem) -> Unit,
+    val setGear: (GearState) -> Unit,
+    val retryVehicle: () -> Unit,
+)
+
+@Composable
+private fun MainScreen(state: UiState, actions: ScreenActions) {
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        StatusBar(state, actions)
+        Spacer(Modifier.height(12.dp))
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            if (maxWidth > maxHeight) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ComposePanel(state, actions, Modifier.weight(1.2f).fillMaxHeight())
+                    InboxPanel(state, actions, Modifier.weight(0.8f).fillMaxHeight())
+                }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    InboxPanel(state, actions, Modifier.weight(0.4f).fillMaxWidth())
+                    ComposePanel(state, actions, Modifier.weight(0.6f).fillMaxWidth())
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusBar(state: UiState, actions: ScreenActions) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Offline Mobility", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.width(4.dp))
+        val vehicleColor = when (state.vehicleMode) {
+            VehicleMode.PLEOS -> Palette.accent
+            VehicleMode.SIMULATION -> Palette.warn
+            VehicleMode.CONNECTING -> MaterialTheme.colorScheme.onSurfaceVariant
+        }
+        Chip(
+            text = when (state.vehicleMode) {
+                VehicleMode.PLEOS -> "차량 연결"
+                VehicleMode.SIMULATION -> "시뮬레이션"
+                VehicleMode.CONNECTING -> "연결 중"
+            },
+            color = vehicleColor,
+            onClick = if (state.vehicleMode == VehicleMode.SIMULATION) actions.retryVehicle else null,
+        )
+        Chip("기어 ${state.gear.label}", if (state.gear == GearState.PARK) Palette.accent else Palette.critical)
+        if (state.vehicleMode == VehicleMode.SIMULATION) {
+            listOf(GearState.PARK, GearState.DRIVE).forEach { g ->
+                Chip(if (g == GearState.PARK) "P로" else "D로", MaterialTheme.colorScheme.onSurfaceVariant) { actions.setGear(g) }
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        LevelMeter(state.inputLevelDb, state.listening)
+        Chip(
+            text = if (state.listening) "수신 대기" else "수신 꺼짐",
+            color = if (state.listening) Palette.accent else MaterialTheme.colorScheme.onSurfaceVariant,
+            onClick = actions.toggleListen,
+        )
+    }
+}
+
+@Composable
+private fun ComposePanel(state: UiState, actions: ScreenActions, modifier: Modifier) {
+    Panel(modifier) {
+        Text("보낼 메시지", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(8.dp))
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = 150.dp),
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Box(
-                modifier = Modifier
-                    .width(4.dp)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(99.dp))
-                    .background(priorityColor),
+            items(RescueMessage.entries.filter { it != RescueMessage.ACK }) { message ->
+                MessageTile(message, selected = message == state.selected, enabled = !state.tx.active) {
+                    actions.select(message)
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("인원", fontSize = 15.sp)
+            SmallButton("−") { actions.people(-1) }
+            Text(if (state.people == 0) "미상" else if (state.people >= 15) "15+" else "${state.people}명", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            SmallButton("+") { actions.people(1) }
+            Spacer(Modifier.width(8.dp))
+            Toggle("소리", state.useSound, actions.toggleSound)
+            Toggle("빛", state.lightEnabled, actions.toggleLight)
+            Toggle("등화관제", state.blackout, actions.toggleBlackout)
+        }
+        if (state.blackout) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "등화관제 중 · 외부 조명 신호를 쓰지 않습니다 (민방공 야간 공습경보 행동요령)",
+                fontSize = 13.sp,
+                color = Palette.warn,
             )
-            Spacer(Modifier.width(11.dp))
-            Column {
+        } else if (state.useLight) {
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LampGroup.entries.forEach { group ->
+                    Toggle(group.label, state.lampGroup == group) { actions.lampGroup(group) }
+                }
+                val unsupported = state.lampGroup.lamps.filter {
+                    state.lampSupport[it] != null && state.lampSupport[it] != LampSupport.WRITABLE
+                }
                 Text(
-                    text = message.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    modifier = Modifier.padding(top = 5.dp),
-                    text = message.description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
+                    text = if (unsupported.isEmpty()) state.lightPattern.title
+                    else unsupported.joinToString { "${it.label} ${state.lampSupport[it]?.label}" },
+                    fontSize = 13.sp,
+                    color = if (unsupported.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else Palette.warn,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
         }
+        Spacer(Modifier.height(10.dp))
+        TransmitBar(state, actions)
     }
 }
 
 @Composable
-private fun SignalPanel(
-    modifier: Modifier,
-    state: MainUiState,
-    onSelectChannel: (SignalChannel) -> Unit,
-    onTransmit: () -> Unit,
-    onSimulateReceive: () -> Unit,
-) {
-    val selectedMessage = EmergencyProtocol.findMessage(state.selectedMessageId)
-        ?: EmergencyProtocol.presets.first()
-    val receivedMessage = state.lastReceivedMessageId?.let(EmergencyProtocol::findMessage)
-
-    Panel(modifier = modifier) {
+private fun TransmitBar(state: UiState, actions: ScreenActions) {
+    val tx = state.tx
+    if (tx.active) {
+        if (tx.soundActive) Progress("음향", tx.soundProgress, Palette.accent)
+        if (tx.lightActive) Progress(if (tx.lightOn) "조명 ● ${tx.lightPattern?.title}" else "조명 ○ ${tx.lightPattern?.title}", tx.lightProgress, Palette.warn)
+        Spacer(Modifier.height(6.dp))
+        Button(
+            onClick = actions.stop,
+            modifier = Modifier.fillMaxWidth().height(64.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Palette.critical),
+        ) { Text("송신 중단", fontSize = 20.sp, fontWeight = FontWeight.Bold) }
+    } else {
+        val reason = state.safety.reasons.firstOrNull()
+            ?: if (!state.useSound && !state.lightEnabled) "소리 또는 빛을 하나 이상 선택하세요" else null
         Text(
-            text = "신호 송수신",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
+            text = reason ?: tx.lastResult ?: "정차(P단) 상태에서만 송신됩니다",
+            fontSize = 13.sp,
+            color = if (reason != null) Palette.critical else MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(
-            modifier = Modifier.padding(top = 3.dp, bottom = 14.dp),
-            text = "현재는 안전한 프로토콜 데모 모드입니다.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        Spacer(Modifier.height(6.dp))
+        Button(
+            onClick = actions.transmit,
+            enabled = state.canTransmit,
+            modifier = Modifier.fillMaxWidth().height(64.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (state.selected.critical) Palette.critical else Palette.accent,
+            ),
         ) {
-            SignalChannel.entries.forEach { channel ->
-                val selected = state.selectedChannel == channel
-                OutlinedButton(
-                    modifier = Modifier.weight(1f),
-                    onClick = { onSelectChannel(channel) },
-                    enabled = state.transmissionPhase != TransmissionPhase.TRANSMITTING,
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = if (selected) Color(0xFF153B3A) else Color.Transparent,
-                        contentColor = if (selected) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    ),
-                ) {
-                    Text(channel.label)
+            Text("${state.selected.title} 보내기", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun InboxPanel(state: UiState, actions: ScreenActions, modifier: Modifier) {
+    Panel(modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("받은 신호", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.weight(1f))
+            Toggle("자동 중계", state.autoRelay, actions.toggleRelay)
+            Spacer(Modifier.width(6.dp))
+            Toggle("가상 수신", false, actions.simulateIncoming)
+        }
+        state.micMessage?.let {
+            Text(it, fontSize = 13.sp, color = Palette.warn, modifier = Modifier.padding(top = 6.dp))
+        }
+        Spacer(Modifier.height(8.dp))
+        if (state.inbox.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    if (state.listening) "주변 차량 신호를 듣고 있습니다" else "수신이 꺼져 있습니다",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(state.inbox, key = { it.id }) { item ->
+                    InboxRow(item, canAck = state.safety.allowed && !state.tx.active) { actions.acknowledge(item) }
                 }
             }
         }
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 14.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color(0xFF071018))
-                .padding(14.dp),
-        ) {
-            Text(
-                text = selectedMessage.title,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Text(
-                modifier = Modifier.padding(top = 7.dp),
-                text = selectedMessage.morsePattern,
-                style = MaterialTheme.typography.titleMedium,
-                fontFamily = FontFamily.Monospace,
-                letterSpacing = 2.sp,
-            )
-        }
-
-        if (state.transmissionPhase == TransmissionPhase.TRANSMITTING) {
-            LinearProgressIndicator(
-                progress = { state.transmissionProgress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 14.dp)
-                    .height(6.dp)
-                    .clip(RoundedCornerShape(99.dp)),
-            )
-        } else {
-            Spacer(Modifier.height(20.dp))
-        }
-
-        val canTransmit = state.isParked && state.transmissionPhase != TransmissionPhase.TRANSMITTING
-        Button(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp),
-            onClick = onTransmit,
-            enabled = canTransmit,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            ),
-        ) {
-            Text(
-                text = when {
-                    !state.isParked -> "주행 중 송신 잠금"
-                    state.transmissionPhase == TransmissionPhase.TRANSMITTING -> "신호 송신 중"
-                    state.transmissionPhase == TransmissionPhase.COMPLETE -> "송신 완료"
-                    else -> "선택 신호 보내기"
-                },
-                fontWeight = FontWeight.Bold,
-            )
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "최근 수신",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    modifier = Modifier.padding(top = 3.dp),
-                    text = receivedMessage?.title ?: "수신된 신호 없음",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-            OutlinedButton(onClick = onSimulateReceive) {
-                Text("수신 테스트")
-            }
-        }
     }
 }
 
+private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.KOREA)
+
 @Composable
-private fun Panel(
-    modifier: Modifier,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    Card(
-        modifier = modifier.fillMaxHeight(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+private fun InboxRow(item: InboxItem, canAck: Boolean, onAck: () -> Unit) {
+    val f = item.frame
+    val color = if (f.message.critical) Palette.critical else Palette.accent
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).border(1.dp, color.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+            .padding(12.dp),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(20.dp),
-            content = content,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (item.kind == InboxKind.ECHO) "내 신호 중계 확인 · ${f.message.title}" else f.message.title,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = color,
+                modifier = Modifier.weight(1f),
+            )
+            Text(timeFormat.format(Date(item.receivedAtMs)), fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+        }
+        val people = when (f.people) { 0 -> "인원 미상"; 15 -> "15명 이상"; else -> "${f.people}명" }
+        val route = if (f.hop == 0) "직접 수신" else "${f.hop}대 거쳐 중계"
+        val extra = buildList {
+            add(people)
+            add(route)
+            add("차량 #%02X".format(f.senderId))
+            if (item.repeats > 1) add("${item.repeats}회 수신")
+            add("SNR %.0fdB".format(item.snrDb))
+            if (item.correctedSymbols > 0) add("오류 ${item.correctedSymbols}개 정정")
+            if (item.relayState.label.isNotEmpty()) add(item.relayState.label)
+        }
+        Text(extra.joinToString(" · "), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (item.kind == InboxKind.NEW && f.message != RescueMessage.ACK) {
+            Spacer(Modifier.height(6.dp))
+            OutlinedButton(onClick = onAck, enabled = canAck, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text("수신 확인 보내기")
+            }
+        }
     }
 }
 
-@Preview(widthDp = 960, heightDp = 540)
 @Composable
-private fun ChallengeScreenPreview() {
-    MaterialTheme(colorScheme = offlineMobilityColors) {
-        ChallengeScreen(
-            state = MainUiState(
-                isConnected = true,
-                message = "Pleos Vehicle SDK 연결됨",
-                lastReceivedMessageId = "BLOCKED",
-            ),
-            onRetry = {},
-            onSelectMessage = {},
-            onSelectChannel = {},
-            onToggleParked = {},
-            onTransmit = {},
-            onSimulateReceive = {},
+private fun MessageTile(message: RescueMessage, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val color = if (message.critical) Palette.critical else Palette.accent
+    Box(
+        Modifier.fillMaxWidth().heightIn(min = 60.dp).clip(RoundedCornerShape(12.dp))
+            .background(if (selected) color.copy(alpha = 0.22f) else Color.Transparent)
+            .border(if (selected) 2.dp else 1.dp, if (selected) color else Palette.line, RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(message.title, fontSize = 16.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun Panel(modifier: Modifier, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    Column(
+        modifier.clip(RoundedCornerShape(16.dp)).background(Palette.card).border(1.dp, Palette.line, RoundedCornerShape(16.dp))
+            .padding(14.dp),
+        content = content,
+    )
+}
+
+@Composable
+private fun Chip(text: String, color: Color, onClick: (() -> Unit)? = null) {
+    Box(
+        Modifier.clip(RoundedCornerShape(50)).border(1.dp, color, RoundedCornerShape(50))
+            .let { if (onClick != null) it.clickable(onClick = onClick) else it }
+            .heightIn(min = 36.dp).padding(horizontal = 12.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) { Text(text, color = color, fontSize = 14.sp, fontWeight = FontWeight.Medium) }
+}
+
+@Composable
+private fun Toggle(text: String, on: Boolean, onClick: () -> Unit) {
+    val color = if (on) Palette.accent else MaterialTheme.colorScheme.onSurfaceVariant
+    Box(
+        Modifier.clip(RoundedCornerShape(10.dp)).background(if (on) color.copy(alpha = 0.18f) else Color.Transparent)
+            .border(1.dp, color, RoundedCornerShape(10.dp)).clickable(onClick = onClick)
+            .heightIn(min = 44.dp).padding(horizontal = 14.dp, vertical = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) { Text(text, color = color, fontSize = 14.sp, fontWeight = FontWeight.Medium) }
+}
+
+@Composable
+private fun SmallButton(text: String, onClick: () -> Unit) {
+    Box(
+        Modifier.size(44.dp).clip(CircleShape).border(1.dp, Palette.line, CircleShape).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { Text(text, fontSize = 20.sp) }
+}
+
+@Composable
+private fun Progress(label: String, value: Float, color: Color) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Text(label, fontSize = 13.sp, color = color)
+        LinearProgressIndicator(progress = { value }, color = color, modifier = Modifier.fillMaxWidth().height(6.dp))
+    }
+}
+
+@Composable
+private fun LevelMeter(db: Float, active: Boolean, width: Dp = 64.dp) {
+    val fraction = ((db + 80f) / 70f).coerceIn(0f, 1f)
+    Box(Modifier.width(width).height(8.dp).clip(RoundedCornerShape(4.dp)).background(Palette.line)) {
+        Box(
+            Modifier.fillMaxHeight().fillMaxWidth(if (active) fraction else 0f)
+                .background(if (fraction > 0.8f) Palette.warn else Palette.accent),
         )
     }
 }

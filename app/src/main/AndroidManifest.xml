@@ -1,7 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Declare only the Pleos permissions required by the final product features. -->
+    <!-- Acoustic receiver: cabin microphone. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Pleos Vehicle SDK. CONTROL_CAR_LIGHTS requires prior approval from Pleos App Market. -->
+    <uses-permission android:name="pleos.car.permission.CAR_LIGHTS" />
+    <uses-permission android:name="pleos.car.permission.CONTROL_CAR_LIGHTS" />
+    <uses-permission android:name="pleos.car.permission.CAR_DRIVE" />
+
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.type.automotive" android:required="false" />
+
     <application
         android:allowBackup="false"
         android:label="@string/app_name"
@@ -9,6 +19,7 @@
         android:theme="@style/Theme.PleosChallenge">
         <activity
             android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -18,4 +29,3 @@
     </application>
 
 </manifest>
-
