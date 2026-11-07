@@ -8,6 +8,9 @@ import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
 import io.github.offlinemobility.app.core.acoustic.AcousticDecoder
 import io.github.offlinemobility.app.core.acoustic.DecodedSignal
 import io.github.offlinemobility.app.core.acoustic.ModemConfig
@@ -41,7 +44,11 @@ class AcousticReceiver(
     val levelDb: StateFlow<Float> = _levelDb.asStateFlow()
 
     private var job: Job? = null
-    private val decoder = AcousticDecoder(config) { _frames.tryEmit(it) }
+    private var decoder = AcousticDecoder(config) { _frames.tryEmit(it) }
+
+    /** Sample rate the microphone actually delivers (some devices only guarantee 44.1 kHz). */
+    var actualSampleRate: Int = config.sampleRate
+        private set
 
     val isRunning: Boolean get() = job?.isActive == true
 
@@ -78,16 +85,19 @@ class AcousticReceiver(
             record.release()
             return Result.failure(IllegalStateException("마이크를 열 수 없습니다"))
         }
+        disableVoiceProcessing(record.audioSessionId)
 
-        synchronized(decoder) { decoder.reset() }
+        actualSampleRate = record.sampleRate
+        decoder = AcousticDecoder(config.copy(sampleRate = actualSampleRate)) { _frames.tryEmit(it) }
+        val activeDecoder = decoder
         job = scope.launch(Dispatchers.Default) {
-            val chunk = FloatArray(config.sampleRate / 20) // 50 ms
+            val chunk = FloatArray(actualSampleRate / 20) // 50 ms
             record.startRecording()
             try {
                 while (isActive) {
                     val read = record.read(chunk, 0, chunk.size, AudioRecord.READ_BLOCKING)
                     if (read <= 0) continue
-                    synchronized(decoder) { decoder.push(chunk, 0, read) }
+                    synchronized(activeDecoder) { activeDecoder.push(chunk, 0, read) }
                     var sum = 0.0
                     for (i in 0 until read) sum += chunk[i] * chunk[i]
                     _levelDb.value = (10 * log10(sum / read + 1e-12)).toFloat()
@@ -108,10 +118,18 @@ class AcousticReceiver(
 
     /** Feeds synthetic audio through the same decoder (demo without a second vehicle). */
     fun injectForDemo(samples: FloatArray) {
-        synchronized(decoder) { decoder.push(samples) }
+        val target = decoder
+        synchronized(target) { target.push(samples) }
         var sum = 0.0
         for (s in samples) sum += s * s
         _levelDb.value = (10 * log10(sum / samples.size + 1e-12)).toFloat()
+    }
+
+    /** Noise suppression, AGC and echo cancellation flatten or remove modem tones. */
+    private fun disableVoiceProcessing(sessionId: Int) {
+        if (NoiseSuppressor.isAvailable()) NoiseSuppressor.create(sessionId)?.enabled = false
+        if (AutomaticGainControl.isAvailable()) AutomaticGainControl.create(sessionId)?.enabled = false
+        if (AcousticEchoCanceler.isAvailable()) AcousticEchoCanceler.create(sessionId)?.enabled = false
     }
 
     private fun preferredSource(): Int {

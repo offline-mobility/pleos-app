@@ -107,4 +107,28 @@ class AcousticModemTest {
         val decoded = decodeAll(signal)
         assertEquals(listOf(other), decoded.map { it.frame })
     }
+
+    @Test
+    fun receiverAt44100DecodesTransmitterAt48000() {
+        val tx = silence(200) + AcousticModem.modulate(frame, config) + silence(400)
+        // Linear-interpolation resample 48 kHz → 44.1 kHz.
+        val ratio = 48_000.0 / 44_100.0
+        val rx = FloatArray((tx.size / ratio).toInt()) { i ->
+            val pos = i * ratio
+            val j = pos.toInt().coerceAtMost(tx.size - 2)
+            val f = pos - j
+            (tx[j] * (1 - f) + tx[j + 1] * f).toFloat()
+        }
+        val out = mutableListOf<DecodedSignal>()
+        val decoder = AcousticDecoder(config.copy(sampleRate = 44_100)) { out += it }
+        decoder.push(rx)
+        assertEquals(listOf(frame), out.map { it.frame })
+    }
+
+    @Test
+    fun survivesHardClippingFromOverdrivenSpeaker() {
+        val tx = silence(200) + AcousticModem.modulate(frame, config) + silence(400)
+        val clipped = FloatArray(tx.size) { (tx[it] * 4f).coerceIn(-0.9f, 0.9f) }
+        assertEquals(listOf(frame), decodeAll(clipped).map { it.frame })
+    }
 }

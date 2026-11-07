@@ -22,10 +22,13 @@ data class ModemConfig(
     val postChirpGapMs: Int = 40,
     val baseToneHz: Double = 1_500.0,
     val toneSpacingHz: Double = 125.0,
+    /** Odd symbols use a second tone bank offset by half the spacing, so reverberation tails fall between bins. */
+    val alternateBankOffsetHz: Double = 62.5,
     val symbolMs: Int = 80,
     val guardMs: Int = 20,
     val rampMs: Int = 5,
-    val amplitude: Float = 0.8f,
+    /** Peak ≈ -3 dBFS; louder settings push car amplifiers into non-linear distortion. */
+    val amplitude: Float = 0.7f,
     val analysisSkipStartMs: Int = 8,
     val analysisSkipEndMs: Int = 5,
     /** Normalized matched-filter score (0–1) required to accept a preamble. */
@@ -42,9 +45,10 @@ data class ModemConfig(
         get() = chirpSamples + gapSamples + RescueFrameCodec.CODEWORD_SYMBOLS * slotSamples
     val frameDurationMs: Long get() = frameSamples * 1000L / sampleRate
 
-    fun toneHz(symbol: Int): Double = baseToneHz + symbol * toneSpacingHz
+    fun toneHz(symbol: Int, slot: Int = 0): Double =
+        baseToneHz + (if (slot % 2 == 1) alternateBankOffsetHz else 0.0) + symbol * toneSpacingHz
 
-    fun ms(value: Int): Int = sampleRate / 1000 * value
+    fun ms(value: Int): Int = (sampleRate.toLong() * value / 1000).toInt()
 }
 
 object AcousticModem {
@@ -56,9 +60,9 @@ object AcousticModem {
         val out = FloatArray(config.chirpSamples + config.gapSamples + symbols.size * config.slotSamples)
         chirp(config).copyInto(out, 0)
         var pos = config.chirpSamples + config.gapSamples
-        for (symbol in symbols) {
+        for ((slot, symbol) in symbols.withIndex()) {
             require(symbol in 0 until config.tones) { "symbol out of range" }
-            writeTone(out, pos, config.symbolSamples, config.toneHz(symbol), config)
+            writeTone(out, pos, config.symbolSamples, config.toneHz(symbol, slot), config)
             pos += config.slotSamples
         }
         return out
@@ -263,7 +267,7 @@ class AcousticDecoder(
             var second = 0.0
             var total = 0.0
             for (tone in 0 until config.tones) {
-                val p = goertzelPower(buffer, from, window, config.toneHz(tone), config.sampleRate)
+                val p = goertzelPower(buffer, from, window, config.toneHz(tone, k), config.sampleRate)
                 total += p
                 if (p > bestPower) {
                     second = maxOf(second, bestPower)
