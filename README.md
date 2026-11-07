@@ -1,8 +1,8 @@
-# HMG Pleos App Challenge
+# Offline Mobility
 
-현대자동차그룹 차량용 앱 개발 공모전을 위한 Android Automotive 기반 Pleos Connect 스타터 프로젝트입니다.
+현대자동차그룹 차량용 앱 개발 공모전을 위한 Android Automotive 기반 재난 통신 프로토타입입니다.
 
-현재 단계에서는 Pleos Vehicle SDK 연결과 개발환경 검증에 집중합니다. 앱 아이디어가 확정되면 필요한 차량 데이터, NaviHelper, 위치·음성 기능을 최소 권한 원칙으로 추가합니다.
+기지국과 인터넷이 끊긴 상황에서 정차한 차량끼리 광학·음향 패턴으로 구조 요청과 도로 정보를 주고받는 경험을 검증합니다. 현재 버전은 메시지 프리셋, 신호 인코딩, 송수신 데모와 안전 잠금을 구현하며 실제 차량 제어는 검증된 SDK 범위에서 단계적으로 연결합니다.
 
 ## 기술 스택
 
@@ -32,21 +32,25 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 17)
 ```text
 app/
   src/main/
-    java/.../MainActivity.kt       Compose 진입 화면
-    java/.../MainViewModel.kt      SDK 연결 상태 관리
+    java/.../MainActivity.kt       차량용 Compose 송수신 화면
+    java/.../MainViewModel.kt      SDK 연결·송수신 상태 관리
+    java/.../EmergencyProtocol.kt  메시지 프리셋과 펄스 인코더
     java/.../PleosVehicleClient.kt Vehicle SDK 생명주기
 docs/
   DEVELOPMENT.md                   에뮬레이터·빌드·테스트 안내
   PRODUCT_BRIEF.md                 아이디어와 SDK 매핑 템플릿
 ```
 
-## 다음 작업
+## 구현 현황
 
-- 공모전 아이디어와 핵심 사용자 시나리오 확정
-- Vehicle API와 최소 Manifest 권한 매핑
-- Capability 확인 → 조회 → 구독 흐름 구현
-- Virtual Console 기반 데모 시나리오 작성
-- APK와 시연 영상 생성
+- [x] Offline Mobility 핵심 사용자 시나리오
+- [x] 재난 메시지 프리셋과 모스 펄스 인코더
+- [x] 광학·음향 송신 UI와 수신 시뮬레이션
+- [x] 주행 중 송신 차단 데모
+- [ ] Gear/Speed Capability 조회와 안전 상태 연동
+- [ ] 검증된 Vehicle API 기반 광학 신호 출력
+- [ ] 음향 신호 출력·수신 프로토타입
+- [ ] Virtual Console 시연 시나리오와 영상
 
 ## 주의
 
