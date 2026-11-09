@@ -45,9 +45,9 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 17)
    OM_WAV_DIR=/tmp/om ./gradlew testDebugUnitTest --tests '*WavFixtureExport*'
    afplay /tmp/om/frame_1_medical.wav
    ```
-5. 두 번째 기기 없이 확인하려면 `가상 수신`을 누릅니다. 다른 차량의 신호를 합성하고 잡음과 반향을 더한 뒤, 실제 수신기로 해독합니다.
+5. 두 번째 기기 없이 확인하려면 `설정 > 다른 차 신호 받아 보기`를 누릅니다. 다른 차량의 신호를 합성하고 잡음과 반향을 더한 뒤, 실제 수신기로 해독합니다.
 
-차량 서비스에 연결되지 않으면 시뮬레이션 모드로 실행됩니다. 이때 상단의 `P로`, `D로` 버튼으로 기어를 바꿀 수 있습니다.
+차량 서비스에 연결되지 않으면 연습 모드로 실행됩니다. 이때 `설정`의 `기어 P`, `기어 D` 버튼으로 기어를 바꿀 수 있습니다.
 
 ## 구조
 
@@ -59,9 +59,11 @@ app/src/main/java/.../
   core/relay/      중복 억제, 홉 제한, 무작위 백오프
   core/safety/     P단 송신 잠금
   vehicle/         Pleos Vehicle SDK 연동(Light, Gear), 조명 패턴 실행·복원
+  ui/              화면, 색·글자 기준, 메시지 문구
   audio/           AudioTrack 송신(오디오 포커스), AudioRecord 수신
 docs/
   PROPOSAL.md         기획서 초안
+  UI_DESIGN.md        화면 설계
   CONTEST_RESEARCH.md 공모전·Pleos 조사 자료
   DEVELOPMENT.md      개발 환경
 ```

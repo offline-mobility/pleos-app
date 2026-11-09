@@ -55,6 +55,7 @@ data class InboxItem(
     val kind: InboxKind,
     val relayState: RelayState,
     val repeats: Int = 1,
+    val acknowledged: Boolean = false,
 )
 
 enum class RelayState(val label: String) {
@@ -67,12 +68,23 @@ enum class RelayState(val label: String) {
 data class TxState(
     val soundActive: Boolean = false,
     val soundProgress: Float = 0f,
+    val soundTotal: Int = 0,
+    val soundDone: Int = 0,
+    val soundFailed: Boolean = false,
     val lightActive: Boolean = false,
+    val lightPlanned: Boolean = false,
     val lightPattern: LightPattern? = null,
     val lightProgress: Float = 0f,
     val lightOn: Boolean = false,
+    val lightConfirmed: Boolean? = null,
+    val lightFailed: Boolean = false,
+    val message: RescueMessage? = null,
+    val people: Int = 0,
     val lastFrame: RescueFrame? = null,
     val lastResult: String? = null,
+    /** Every planned channel has finished on its own (not stopped). */
+    val finished: Boolean = false,
+    val stopped: Boolean = false,
 ) {
     val active: Boolean get() = soundActive || lightActive
 }
@@ -188,7 +200,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val turningOn = !_state.value.blackout
         if (turningOn && _state.value.tx.lightActive) {
             lightJob?.cancel()
-            _state.update { it.copy(tx = it.tx.copy(lightActive = false, lightOn = false, lastResult = "등화관제로 조명 신호를 껐습니다")) }
+            _state.update { it.copy(tx = it.tx.copy(lightActive = false, lightOn = false, lightPlanned = false).settle()) }
         }
         _state.update { it.copy(blackout = turningOn) }
     }
@@ -214,39 +226,82 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onMicPermissionDenied() = _state.update { it.copy(micMessage = "마이크 권한이 없어 수신할 수 없습니다") }
 
-    fun transmit() {
+    /** [withPeople] is false for messages about roads or shelters, which carry no head count. */
+    fun send(message: RescueMessage, withPeople: Boolean = true) {
+        if (_state.value.tx.active) return
+        _state.update { it.copy(selected = message) }
+        transmit(withPeople)
+    }
+
+    fun transmit(withPeople: Boolean = true) {
         val s = _state.value
         if (!s.canTransmit) return
         sequence = (sequence + 1) % 16
-        val frame = RescueFrame(s.selected, s.people, senderId, sequence)
+        val frame = RescueFrame(s.selected, if (withPeople) s.people else 0, senderId, sequence)
         Log.i(TAG, "transmit $frame sound=${s.useSound} light=${s.lightUsable} plan=${s.lightPlan}")
         relayPolicy.markSent(frame, System.currentTimeMillis())
-        _state.update { it.copy(tx = TxState(lastFrame = frame)) }
-        if (s.useSound) sendSound(frame, repeats = SOUND_REPEATS)
-        if (s.lightUsable) sendLight(s.lightPattern, s.lightPlan)
+        startTx(frame, s.lightPattern, soundRepeats = if (s.useSound) SOUND_REPEATS else 0)
     }
 
     fun acknowledge(item: InboxItem) {
-        if (!_state.value.safety.allowed || _state.value.tx.active) return
+        val s = _state.value
+        if (!s.safety.allowed || s.tx.active) return
         sequence = (sequence + 1) % 16
-        val ack = RescueFrame(RescueMessage.ACK, _state.value.people, senderId, sequence)
+        val ack = RescueFrame(RescueMessage.ACK, s.people, senderId, sequence)
         relayPolicy.markSent(ack, System.currentTimeMillis())
-        _state.update { it.copy(tx = TxState(lastFrame = ack)) }
-        sendSound(ack, repeats = 2)
-        if (_state.value.lightUsable) sendLight(LightPatterns.REPLY, _state.value.lightPlan)
+        _state.update { st -> st.copy(inbox = st.inbox.map { if (it.id == item.id) it.copy(acknowledged = true) else it }) }
+        startTx(ack, LightPatterns.REPLY, soundRepeats = if (s.useSound) 2 else 0)
     }
 
-    fun stopTransmission(reason: String = "송신을 중단했습니다") {
+    private fun startTx(frame: RescueFrame, pattern: LightPattern, soundRepeats: Int) {
+        val s = _state.value
+        val light = s.lightUsable
+        _state.update {
+            it.copy(
+                tx = TxState(
+                    soundActive = soundRepeats > 0,
+                    soundTotal = soundRepeats,
+                    lightActive = light,
+                    lightPlanned = light,
+                    lightPattern = if (light) pattern else null,
+                    message = frame.message,
+                    people = frame.people,
+                    lastFrame = frame,
+                ),
+            )
+        }
+        if (soundRepeats > 0) sendSound(frame, soundRepeats)
+        if (light) sendLight(pattern, s.lightPlan)
+    }
+
+    /** Back to the message list after a finished or stopped transmission. */
+    fun dismissResult() {
+        if (_state.value.tx.active) return
+        _state.update { it.copy(tx = TxState()) }
+    }
+
+    fun stopTransmission(reason: String = "보내기를 멈췄어요") {
         val wasActive = _state.value.tx.active
         if (wasActive) Log.i(TAG, "stop: $reason")
         soundJob?.cancel()
         lightJob?.cancel()
         if (wasActive) {
             _state.update {
-                it.copy(tx = it.tx.copy(soundActive = false, lightActive = false, lightOn = false, lastResult = reason))
+                it.copy(
+                    tx = it.tx.copy(
+                        soundActive = false,
+                        lightActive = false,
+                        lightOn = false,
+                        stopped = true,
+                        finished = false,
+                        lastResult = reason,
+                    ),
+                )
             }
         }
     }
+
+    private fun TxState.settle(): TxState = if (!active && !stopped) copy(finished = true) else this
 
     private fun sendSound(frame: RescueFrame, repeats: Int) {
         val audio = AcousticModem.modulate(frame, config)
@@ -260,15 +315,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     Log.w(TAG, "sound failed: $error")
                     break
                 }
-                _state.update { it.copy(tx = it.tx.copy(soundProgress = (i + 1f) / repeats)) }
+                _state.update { it.copy(tx = it.tx.copy(soundProgress = (i + 1f) / repeats, soundDone = i + 1)) }
                 if (i < repeats - 1) delay(SOUND_GAP_MS)
             }
             _state.update {
                 it.copy(
                     tx = it.tx.copy(
                         soundActive = false,
-                        lastResult = error?.let { e -> "음향 송신 실패: $e" } ?: it.tx.lastResult ?: "음향 신호 ${repeats}회 송신 완료",
-                    ),
+                        soundFailed = error != null,
+                        lastResult = error?.let { e -> "음향 송신 실패: $e" } ?: it.tx.lastResult,
+                    ).settle(),
                 )
             }
         }
@@ -293,7 +349,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 "조명 제어 실패 ${report.failures}회 · 차량이 이 조명 제어를 허용하지 않습니다"
             }
-            _state.update { it.copy(tx = it.tx.copy(lightActive = false, lightOn = false, lastResult = summary)) }
+            Log.i(TAG, summary)
+            _state.update {
+                it.copy(
+                    tx = it.tx.copy(
+                        lightActive = false,
+                        lightOn = false,
+                        lightConfirmed = confirmed.isNotEmpty(),
+                        lightFailed = report.failures > 0,
+                    ).settle(),
+                )
+            }
         }
     }
 
