@@ -133,7 +133,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         connectVehicle()
         viewModelScope.launch { receiver.frames.collect(::onDecoded) }
-        viewModelScope.launch { receiver.levelDb.collect { db -> _state.update { it.copy(inputLevelDb = db) } } }
+        viewModelScope.launch {
+            var lastLog = 0L
+            receiver.levelDb.collect { db ->
+                _state.update { it.copy(inputLevelDb = db) }
+                val now = System.currentTimeMillis()
+                if (now - lastLog > 2_000) {
+                    lastLog = now
+                    Log.d(TAG, "mic level ${"%.1f".format(db)} dBFS")
+                }
+            }
+        }
     }
 
     fun connectVehicle() {

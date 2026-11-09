@@ -40,7 +40,11 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 17)
 1. 에뮬레이터를 실행하고 `adb forward tcp:8088 tcp:8088` 후 `http://127.0.0.1:8088/`에서 Virtual Console을 엽니다.
 2. Motion에서 Gear Selection을 P로 둡니다. D로 바꾸면 송신이 막히고, 송신 중이면 즉시 중단됩니다.
 3. 메시지를 고르고 `보내기`를 누릅니다. Virtual Console의 Exterior Lights Mode 카드에서 하향등 점멸을 확인합니다. 에뮬레이터는 상향등 스위치 명령만 받고 실제 상향등 상태는 바꾸지 않으므로, 화면 결과에 "점등 미확인 상향등"으로 표시됩니다.
-4. 에뮬레이터 Extended Controls > Microphone에서 호스트 마이크 입력을 켜면, 다른 기기에서 재생한 신호를 수신합니다.
+4. 에뮬레이터를 `-allow-host-audio`로 실행하고 `adb emu avd hostmicon`으로 호스트 마이크 입력을 켜면, 다른 기기에서 재생한 신호를 수신합니다. 테스트용 신호 WAV는 아래 명령으로 만듭니다.
+   ```bash
+   OM_WAV_DIR=/tmp/om ./gradlew testDebugUnitTest --tests '*WavFixtureExport*'
+   afplay /tmp/om/frame_1_medical.wav
+   ```
 5. 두 번째 기기 없이 확인하려면 `가상 수신`을 누릅니다. 다른 차량의 신호를 합성하고 잡음과 반향을 더한 뒤, 실제 수신기로 해독합니다.
 
 차량 서비스에 연결되지 않으면 시뮬레이션 모드로 실행됩니다. 이때 상단의 `P로`, `D로` 버튼으로 기어를 바꿀 수 있습니다.
