@@ -58,32 +58,24 @@ val RescueMessage.copy: MessageCopy
         RescueMessage.RESCUE_TEAM -> MessageCopy("구조대 접근", "구조대가 오고 있어요", Icons.Filled.HealthAndSafety, Tone.SAFE)
         RescueMessage.ALL_SAFE -> MessageCopy("모두 안전", "우리 차 사람들은 괜찮아요", Icons.Filled.CheckCircle, Tone.SAFE)
         RescueMessage.ACK -> MessageCopy("잘 받았어요", "신호를 받았다는 응답", Icons.Filled.Done, Tone.NEUTRAL)
-        RescueMessage.COLD -> MessageCopy("추위·저체온", "몸이 너무 차가워요 · 난방이 필요해요", Icons.Filled.AcUnit, Tone.URGENT)
+        RescueMessage.COLD -> MessageCopy("추위·저체온", "몸이 차가워 난방이 필요해요", Icons.Filled.AcUnit, Tone.URGENT)
         RescueMessage.COLLAPSE -> MessageCopy("붕괴·낙석", "건물이나 흙·돌이 무너졌어요", Icons.Filled.Landslide, Tone.URGENT)
         RescueMessage.CBRN -> MessageCopy("화생방·방사능", "유독가스나 방사능 경보가 있어요", Icons.Filled.Masks, Tone.URGENT)
         RescueMessage.FOOD -> MessageCopy("식량 필요", "먹을 것이 없어요", Icons.Filled.Restaurant, Tone.HELP)
         RescueMessage.MEDICINE -> MessageCopy("약 필요", "꼭 먹어야 할 약이 떨어졌어요", Icons.Filled.Medication, Tone.HELP)
     }
 
-/** Messages on the first screen: the most urgent ones. */
-val PrimaryMessages = listOf(
-    RescueMessage.MEDICAL,
-    RescueMessage.TRAPPED,
-    RescueMessage.FIRE,
-    RescueMessage.FLOOD,
-    RescueMessage.WATER,
-)
-
-/** Remaining messages grouped for the "다른 메시지" sheet (at most three per row). */
-val MoreMessageGroups = listOf(
-    "위험" to listOf(RescueMessage.HAZARD, RescueMessage.COLLAPSE, RescueMessage.CBRN),
-    "사람" to listOf(RescueMessage.VULNERABLE, RescueMessage.COLD, RescueMessage.MEDICINE),
-    "물자" to listOf(RescueMessage.FOOD, RescueMessage.POWER),
+/** Message groups for the "다른 메시지" sheet; messages already on the first screen are left out. */
+private val AllGroups = listOf(
+    "위험" to listOf(RescueMessage.FIRE, RescueMessage.FLOOD, RescueMessage.HAZARD, RescueMessage.COLLAPSE, RescueMessage.CBRN),
+    "사람" to listOf(RescueMessage.MEDICAL, RescueMessage.TRAPPED, RescueMessage.VULNERABLE, RescueMessage.COLD, RescueMessage.MEDICINE),
+    "물자" to listOf(RescueMessage.WATER, RescueMessage.FOOD, RescueMessage.POWER),
     "길·대피" to listOf(RescueMessage.ROAD_BLOCKED, RescueMessage.ROUTE_CLEAR, RescueMessage.SHELTER),
     "안전" to listOf(RescueMessage.RESCUE_TEAM, RescueMessage.ALL_SAFE),
 )
 
-val MoreMessageCount: Int get() = MoreMessageGroups.sumOf { it.second.size }
+fun moreGroups(primary: List<RescueMessage>): List<Pair<String, List<RescueMessage>>> =
+    AllGroups.map { (name, list) -> name to list.filter { it !in primary } }.filter { it.second.isNotEmpty() }
 
 @Composable
 fun Tone.strong(): Color {

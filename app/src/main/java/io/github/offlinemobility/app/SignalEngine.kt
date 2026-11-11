@@ -6,6 +6,9 @@ import io.github.offlinemobility.app.audio.AcousticTransmitter
 import io.github.offlinemobility.app.core.acoustic.AcousticModem
 import io.github.offlinemobility.app.core.acoustic.DecodedSignal
 import io.github.offlinemobility.app.core.acoustic.ModemConfig
+import io.github.offlinemobility.app.core.disaster.DisasterGuide
+import io.github.offlinemobility.app.core.disaster.DisasterGuides
+import io.github.offlinemobility.app.core.disaster.DisasterType
 import io.github.offlinemobility.app.core.light.Lamp
 import io.github.offlinemobility.app.core.light.LampGroup
 import io.github.offlinemobility.app.core.light.LightPattern
@@ -116,7 +119,10 @@ data class UiState(
     val locationPermission: Boolean = false,
     /** Attach the car's position to outgoing messages. */
     val shareLocation: Boolean = true,
+    val disaster: DisasterType = DisasterType.GENERAL,
 ) {
+    val guide: DisasterGuide get() = DisasterGuides.of(disaster)
+
     val safety: SafetyVerdict
         get() = SafetyGate.evaluate(VehicleSafetyState(gear), if (useLight) TransmitChannel.LIGHT else TransmitChannel.SOUND)
     val lightPattern: LightPattern get() = LightPatterns.forMessage(selected)
@@ -147,6 +153,7 @@ class SignalEngine(application: Application) {
     private val transmitter = AcousticTransmitter(application)
     private val receiver = AcousticReceiver(application, config)
     private val locationTracker = LocationTracker(application)
+    private val prefs = application.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
     private val relayPolicy = RelayPolicy(ownSenderId = senderId)
 
     private val _state = MutableStateFlow(UiState(senderId = senderId))
@@ -157,7 +164,17 @@ class SignalEngine(application: Application) {
     private var gearJob: Job? = null
     private var inboxId = 0L
 
+    /** True while blackout is on only because the air-raid mode turned it on. */
+    private var blackoutByMode = false
+
     init {
+        val savedDisaster = prefs.getString(KEY_DISASTER, null)
+            ?.let { name -> DisasterType.entries.firstOrNull { it.name == name } }
+        if (savedDisaster != null) {
+            val modeBlackout = DisasterGuides.of(savedDisaster).blackout
+            blackoutByMode = modeBlackout
+            _state.update { it.copy(disaster = savedDisaster, blackout = modeBlackout) }
+        }
         scope.launch { locationTracker.fix.collect { fix -> _state.update { it.copy(myFix = fix) } } }
         refreshLocation()
         connectVehicle()
@@ -215,6 +232,27 @@ class SignalEngine(application: Application) {
 
     fun toggleShareLocation() = _state.update { it.copy(shareLocation = !it.shareLocation) }
 
+    /**
+     * Switches the disaster mode. A mode that calls for blackout (air raid) turns it on, and leaving
+     * that mode turns it off again unless the user had switched it on themselves.
+     */
+    fun selectDisaster(type: DisasterType) {
+        prefs.edit().putString(KEY_DISASTER, type.name).apply()
+        val guide = DisasterGuides.of(type)
+        val blackout = _state.value.blackout
+        when {
+            guide.blackout && !blackout -> {
+                toggleBlackout()
+                blackoutByMode = true
+            }
+            !guide.blackout && blackout && blackoutByMode -> {
+                toggleBlackout()
+                blackoutByMode = false
+            }
+        }
+        _state.update { it.copy(disaster = type) }
+    }
+
     /** Starts GPS when permission is available (called again after the user grants it). */
     fun refreshLocation() {
         val granted = locationTracker.hasPermission()
@@ -226,6 +264,11 @@ class SignalEngine(application: Application) {
         if (!_state.value.shareLocation) return null
         val fix = locationTracker.current() ?: return null
         return GeoCell.of(fix.latitude, fix.longitude)
+    }
+
+    fun toggleBlackoutByUser() {
+        blackoutByMode = false
+        toggleBlackout()
     }
 
     fun toggleBlackout() {
@@ -501,6 +544,7 @@ class SignalEngine(application: Application) {
     }
 
     private companion object {
+        const val KEY_DISASTER = "disaster"
         const val SOUND_REPEATS = 3
         const val SOUND_GAP_MS = 400L
         const val MAX_INBOX = 30

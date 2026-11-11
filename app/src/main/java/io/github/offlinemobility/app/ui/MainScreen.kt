@@ -66,6 +66,9 @@ import io.github.offlinemobility.app.InboxKind
 import io.github.offlinemobility.app.RelayState
 import io.github.offlinemobility.app.UiState
 import io.github.offlinemobility.app.VehicleMode
+import io.github.offlinemobility.app.core.disaster.DisasterGuide
+import io.github.offlinemobility.app.core.disaster.DisasterType
+import io.github.offlinemobility.app.core.disaster.WindowAdvice
 import io.github.offlinemobility.app.core.light.Lamp
 import io.github.offlinemobility.app.core.light.LampGroup
 import io.github.offlinemobility.app.core.light.LightPattern
@@ -91,12 +94,13 @@ class ScreenActions(
     val toggleBlackout: () -> Unit,
     val toggleRelay: () -> Unit,
     val toggleShareLocation: () -> Unit,
+    val selectDisaster: (DisasterType) -> Unit,
     val simulateIncoming: () -> Unit,
     val setGear: (GearState) -> Unit,
     val retryVehicle: () -> Unit,
 )
 
-private enum class Overlay { NONE, CONFIRM, MORE, SETTINGS }
+private enum class Overlay { NONE, CONFIRM, MORE, SETTINGS, DISASTER, GUIDE }
 
 @Composable
 fun MainScreen(state: UiState, actions: ScreenActions) {
@@ -119,17 +123,17 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
 
     Box(Modifier.fillMaxSize().background(c.page)) {
         Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 20.dp)) {
-            Header(state, onSettings = { overlay = Overlay.SETTINGS })
+            Header(state, onDisaster = { overlay = Overlay.DISASTER }, onSettings = { overlay = Overlay.SETTINGS })
             Spacer(Modifier.height(Size.gap))
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 if (maxWidth > maxHeight) {
                     Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                        SendArea(state, actions, now, pick, onMore = { overlay = Overlay.MORE }, Modifier.weight(1.15f).fillMaxHeight())
+                        SendArea(state, actions, now, pick, onMore = { overlay = Overlay.MORE }, onGuide = { overlay = Overlay.GUIDE }, Modifier.weight(1.15f).fillMaxHeight())
                         InboxArea(state, actions, now, Modifier.weight(0.85f).fillMaxHeight())
                     }
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                        SendArea(state, actions, now, pick, onMore = { overlay = Overlay.MORE }, Modifier.weight(0.58f).fillMaxWidth())
+                        SendArea(state, actions, now, pick, onMore = { overlay = Overlay.MORE }, onGuide = { overlay = Overlay.GUIDE }, Modifier.weight(0.58f).fillMaxWidth())
                         InboxArea(state, actions, now, Modifier.weight(0.42f).fillMaxWidth())
                     }
                 }
@@ -150,7 +154,16 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
                     },
                 )
             }
-            Overlay.MORE -> MoreSheet(onPick = pick, onClose = { overlay = Overlay.NONE })
+            Overlay.MORE -> MoreSheet(state.guide.primary, onPick = pick, onClose = { overlay = Overlay.NONE })
+            Overlay.DISASTER -> DisasterSheet(
+                current = state.disaster,
+                onPick = {
+                    actions.selectDisaster(it)
+                    overlay = if (it == DisasterType.GENERAL) Overlay.NONE else Overlay.GUIDE
+                },
+                onClose = { overlay = Overlay.NONE },
+            )
+            Overlay.GUIDE -> GuideSheet(state.guide, onClose = { overlay = Overlay.NONE })
             Overlay.SETTINGS -> SettingsSheet(state, actions, onClose = { overlay = Overlay.NONE })
             Overlay.NONE -> Unit
         }
@@ -160,7 +173,7 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
 // ---------------------------------------------------------------- header
 
 @Composable
-private fun Header(state: UiState, onSettings: () -> Unit) {
+private fun Header(state: UiState, onDisaster: () -> Unit, onSettings: () -> Unit) {
     val c = LocalAppColors.current
     val (dot, text) = when {
         state.vehicleMode == VehicleMode.CONNECTING -> c.mute to "차량에 연결하는 중"
@@ -181,6 +194,14 @@ private fun Header(state: UiState, onSettings: () -> Unit) {
             Tag("등화관제 중", c.help, c.helpSoft)
             Spacer(Modifier.width(12.dp))
         }
+        AppButton(
+            "상황: ${state.disaster.label}",
+            onDisaster,
+            Kind.SECONDARY,
+            height = Size.secondaryButton,
+            icon = state.disaster.icon,
+        )
+        Spacer(Modifier.width(12.dp))
         AppButton("설정", onSettings, Kind.SECONDARY, height = Size.secondaryButton, icon = Icons.Filled.Settings)
     }
 }
@@ -194,6 +215,7 @@ private fun SendArea(
     now: Long,
     onPick: (RescueMessage) -> Unit,
     onMore: () -> Unit,
+    onGuide: () -> Unit,
     modifier: Modifier,
 ) {
     val tx = state.tx
@@ -211,7 +233,11 @@ private fun SendArea(
                 )
                 Spacer(Modifier.height(Size.gap))
             }
-            MessagePicker(enabled = state.safety.allowed, onPick = onPick, onMore = onMore, modifier = Modifier.weight(1f))
+            if (state.disaster != DisasterType.GENERAL) {
+                GuideBanner(state.guide, onGuide)
+                Spacer(Modifier.height(Size.gap))
+            }
+            MessagePicker(state.guide.primary, enabled = state.safety.allowed, onPick = onPick, onMore = onMore, modifier = Modifier.weight(1f))
             if (!state.safety.allowed) {
                 Spacer(Modifier.height(Size.gap))
                 Banner(
@@ -227,7 +253,13 @@ private fun SendArea(
 }
 
 @Composable
-private fun MessagePicker(enabled: Boolean, onPick: (RescueMessage) -> Unit, onMore: () -> Unit, modifier: Modifier) {
+private fun MessagePicker(
+    primary: List<RescueMessage>,
+    enabled: Boolean,
+    onPick: (RescueMessage) -> Unit,
+    onMore: () -> Unit,
+    modifier: Modifier,
+) {
     val c = LocalAppColors.current
     Column(modifier.alpha(if (enabled) 1f else 0.4f), verticalArrangement = Arrangement.spacedBy(Size.gap)) {
         val sos = RescueMessage.SOS.copy
@@ -246,7 +278,7 @@ private fun MessagePicker(enabled: Boolean, onPick: (RescueMessage) -> Unit, onM
                 Text(sos.detail, fontSize = Type.title, color = c.onStrong.copy(alpha = 0.92f))
             }
         }
-        val rows = PrimaryMessages.chunked(3)
+        val rows = primary.chunked(3)
         Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
             rows[0].forEach { MessageTile(it, enabled, onPick, Modifier.weight(1f).fillMaxHeight()) }
         }
@@ -256,7 +288,7 @@ private fun MessagePicker(enabled: Boolean, onPick: (RescueMessage) -> Unit, onM
                 icon = Icons.Filled.Apps,
                 iconTint = c.body,
                 title = "다른 메시지",
-                detail = "${MoreMessageCount}가지 더 보기",
+                detail = "${moreGroups(primary).sumOf { it.second.size }}가지 더 보기",
                 enabled = enabled,
                 onClick = onMore,
                 modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -474,8 +506,12 @@ private fun InboxArea(state: UiState, actions: ScreenActions, now: Long, modifie
                 Text("아직 받은 신호가 없어요", fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.body)
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    if (state.listening) "주변 차량의 신호를 듣고 있어요\n창문을 조금 열면 더 멀리서도 들려요"
-                    else "듣기가 꺼져 있어요 · 위의 버튼을 눌러 켜 주세요",
+                    if (!state.listening) "듣기가 꺼져 있어요 · 위의 버튼을 눌러 켜 주세요"
+                    else when (state.guide.window) {
+                        WindowAdvice.OPEN_A_LITTLE -> "주변 차량의 신호를 듣고 있어요\n창문을 조금 열면 더 멀리서도 들려요"
+                        WindowAdvice.KEEP_CLOSED -> "주변 차량의 신호를 듣고 있어요\n지금은 창문을 닫아 두세요 · 들리는 거리는 줄어요"
+                        WindowAdvice.NO_ADVICE -> "주변 차량의 신호를 듣고 있어요"
+                    },
                     fontSize = Type.meta,
                     color = c.mute,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -676,21 +712,24 @@ private fun RoundButton(text: String, enabled: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun MoreSheet(onPick: (RescueMessage) -> Unit, onClose: () -> Unit) {
+private fun MoreSheet(primary: List<RescueMessage>, onPick: (RescueMessage) -> Unit, onClose: () -> Unit) {
     val c = LocalAppColors.current
     SheetScrim(onClose) {
         Sheet(width = 1100.dp) {
             Text("다른 메시지", fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink)
             Spacer(Modifier.height(20.dp))
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
-                MoreMessageGroups.forEach { (group, messages) ->
+                moreGroups(primary).forEach { (group, messages) ->
                     Text(group, fontSize = Type.meta, fontWeight = FontWeight.SemiBold, color = c.mute)
                     Spacer(Modifier.height(10.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
-                        messages.forEach { MessageTile(it, true, onPick, Modifier.weight(1f)) }
-                        repeat(3 - messages.size) { Spacer(Modifier.weight(1f)) }
+                    messages.chunked(3).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
+                            row.forEach { MessageTile(it, true, onPick, Modifier.weight(1f)) }
+                            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                        Spacer(Modifier.height(Size.gap))
                     }
-                    Spacer(Modifier.height(20.dp))
+                    Spacer(Modifier.height(8.dp))
                 }
             }
             AppButton("닫기", onClose, Kind.SECONDARY, Modifier.fillMaxWidth())
@@ -896,4 +935,114 @@ private fun whereText(frame: RescueFrame, myFix: Fix?): String? {
     if (myFix == null) return "위치 받음"
     val offset = Geo.offset(myFix.latitude, myFix.longitude, cell.latitude, cell.longitude)
     return if (offset.meters < 50) "아주 가까이" else "${Geo.compassWord(offset.bearingDeg)} ${Geo.distanceWord(offset.meters)}"
+}
+
+// ---------------------------------------------------------------- disaster
+
+@Composable
+private fun GuideBanner(guide: DisasterGuide, onClick: () -> Unit) {
+    val c = LocalAppColors.current
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 88.dp).clip(RoundedCornerShape(Size.radius)).background(c.helpSoft)
+            .clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(guide.type.icon, contentDescription = null, tint = c.help, modifier = Modifier.size(40.dp))
+        Spacer(Modifier.width(16.dp))
+        Text(guide.headline, fontSize = Type.body, fontWeight = FontWeight.SemiBold, color = c.ink, modifier = Modifier.weight(1f))
+        Spacer(Modifier.width(12.dp))
+        Text("행동요령 ›", fontSize = Type.body, fontWeight = FontWeight.Bold, color = c.help)
+    }
+}
+
+@Composable
+private fun DisasterSheet(current: DisasterType, onPick: (DisasterType) -> Unit, onClose: () -> Unit) {
+    val c = LocalAppColors.current
+    SheetScrim(onClose) {
+        Sheet(width = 1200.dp) {
+            Text("지금 어떤 상황인가요?", fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink)
+            Text("고르면 그 상황에 맞는 행동요령과 메시지를 먼저 보여 줘요", fontSize = Type.body, color = c.body)
+            Spacer(Modifier.height(20.dp))
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                DisasterType.entries.chunked(4).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
+                        row.forEach { type ->
+                            val selected = type == current
+                            Column(
+                                Modifier.weight(1f).heightIn(min = 120.dp).clip(RoundedCornerShape(Size.radius))
+                                    .background(if (selected) c.accentSoft else c.canvas)
+                                    .border(if (selected) 2.dp else 1.dp, if (selected) c.accent else c.line, RoundedCornerShape(Size.radius))
+                                    .clickable { onPick(type) }.padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
+                            ) {
+                                Icon(type.icon, contentDescription = null, tint = if (selected) c.accent else c.body, modifier = Modifier.size(48.dp))
+                                Spacer(Modifier.height(8.dp))
+                                Text(type.label, fontSize = Type.body, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1)
+                            }
+                        }
+                        repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                    Spacer(Modifier.height(Size.gap))
+                }
+            }
+            AppButton("닫기", onClose, Kind.SECONDARY, Modifier.fillMaxWidth())
+        }
+    }
+}
+
+@Composable
+private fun GuideSheet(guide: DisasterGuide, onClose: () -> Unit) {
+    val c = LocalAppColors.current
+    SheetScrim(onClose) {
+        Sheet(width = 1100.dp) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(guide.type.icon, contentDescription = null, tint = c.help, modifier = Modifier.size(52.dp))
+                Spacer(Modifier.width(16.dp))
+                Text("${guide.type.label} 행동요령", fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink)
+            }
+            Spacer(Modifier.height(16.dp))
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                SectionTitle("이렇게 하세요")
+                guide.actions.forEachIndexed { i, step ->
+                    GuideLine("${i + 1}", step.text, c.ink, step.foreign)
+                }
+                if (guide.avoid.isNotEmpty()) {
+                    SectionTitle("하지 마세요")
+                    guide.avoid.forEach { GuideLine("✕", it.text, c.urgent, it.foreign) }
+                }
+                guide.carRisk?.let {
+                    SectionTitle("차에서 조심할 점")
+                    Text(it, fontSize = Type.body, color = c.ink, modifier = Modifier.padding(vertical = 6.dp))
+                }
+                SectionTitle("출처")
+                guide.sources.forEach {
+                    Text("${it.kind.label} · ${it.name}", fontSize = Type.meta, color = c.mute)
+                }
+                if ((guide.actions + guide.avoid).any { it.foreign }) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("(해외) 표시는 국내 공식 지침이 없어 해외 정부 자료를 옮긴 내용이에요", fontSize = Type.meta, color = c.mute)
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+            AppButton("닫기", onClose, Kind.SECONDARY, Modifier.fillMaxWidth())
+        }
+    }
+}
+
+@Composable
+private fun GuideLine(mark: String, text: String, markColor: Color, foreign: Boolean) {
+    val c = LocalAppColors.current
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.Top) {
+        Box(Modifier.size(40.dp).clip(CircleShape).background(c.surface), contentAlignment = Alignment.Center) {
+            Text(mark, fontSize = Type.meta, fontWeight = FontWeight.Bold, color = markColor)
+        }
+        Spacer(Modifier.width(14.dp))
+        Text(
+            if (foreign) "$text (해외)" else text,
+            fontSize = Type.body,
+            color = c.ink,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+    }
 }
