@@ -16,6 +16,10 @@ import io.github.offlinemobility.app.core.disaster.DisasterType
 import io.github.offlinemobility.app.core.energy.Endurance
 import io.github.offlinemobility.app.core.energy.EnduranceEstimate
 import io.github.offlinemobility.app.core.energy.EnergyReading
+import io.github.offlinemobility.app.core.gateway.RescueReport
+import io.github.offlinemobility.app.gateway.GatewayStatus
+import io.github.offlinemobility.app.gateway.GatewayUploader
+import io.github.offlinemobility.app.gateway.RescueOutbox
 import io.github.offlinemobility.app.core.light.Lamp
 import io.github.offlinemobility.app.core.light.LampGroup
 import io.github.offlinemobility.app.core.light.LightPattern
@@ -69,6 +73,8 @@ data class InboxItem(
     val relayState: RelayState,
     val repeats: Int = 1,
     val acknowledged: Boolean = false,
+    /** Uploaded to the rescue server by this car. */
+    val forwarded: Boolean = false,
 )
 
 enum class RelayState(val label: String) {
@@ -134,6 +140,7 @@ data class UiState(
     val voiceAnnounce: Boolean = true,
     val voiceAvailable: Boolean = false,
     val energy: EnergyReading? = null,
+    val gateway: GatewayStatus = GatewayStatus(enabled = false),
 ) {
     val guide: DisasterGuide get() = DisasterGuides.of(disaster)
 
@@ -170,6 +177,8 @@ class SignalEngine(application: Application) {
     private val receiver = AcousticReceiver(application, config)
     private val locationTracker = LocationTracker(application)
     private val announcer = VoiceAnnouncer(application, scope)
+    private val outbox = RescueOutbox(application)
+    private val uploader = GatewayUploader(application, outbox, BuildConfig.GATEWAY_URL, scope)
     private val prefs = application.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
     private val relayPolicy = RelayPolicy(ownSenderId = senderId)
 
@@ -186,6 +195,8 @@ class SignalEngine(application: Application) {
     private var blackoutByMode = false
 
     init {
+        uploader.start()
+        scope.launch { uploader.status.collect { st -> _state.update { it.copy(gateway = st) } } }
         scope.launch { announcer.available.collect { ok -> _state.update { it.copy(voiceAvailable = ok) } } }
         val savedDisaster = prefs.getString(KEY_DISASTER, null)
             ?.let { name -> DisasterType.entries.firstOrNull { it.name == name } }
@@ -353,6 +364,7 @@ class SignalEngine(application: Application) {
         val frame = RescueFrame(s.selected, if (withPeople) s.people else 0, senderId, sequence, location = outgoingLocation())
         debugLog { "transmit $frame sound=${s.useSound} light=${s.lightUsable} plan=${s.lightPlan}" }
         relayPolicy.markSent(frame, System.currentTimeMillis())
+        queueForRescue(frame, own = true)
         startTx(frame, s.lightPattern, soundRepeats = if (s.useSound) SOUND_REPEATS else 0)
     }
 
@@ -502,8 +514,17 @@ class SignalEngine(application: Application) {
                 )
                 if (willRelay) scheduleRelay(item.id, relay!!, decision.relayDelayMs)
                 announce(signal.frame)
+                queueForRescue(signal.frame, own = false)
             }
         }
+    }
+
+    /** Keeps the message for the rescue server; uploaded as soon as any network is available. */
+    private fun queueForRescue(frame: RescueFrame, own: Boolean) {
+        if (frame.message == RescueMessage.ACK) return
+        runCatching { outbox.add(RescueReport.of(frame, System.currentTimeMillis(), own)) }
+            .onFailure { debugLog { "outbox write failed: $it" } }
+        uploader.onQueued()
     }
 
     /** Speaks a new message once our own sound transmission (if any) has finished. */

@@ -554,7 +554,7 @@ private fun InboxArea(state: UiState, actions: ScreenActions, now: Long, modifie
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(items, key = { it.id }) { item ->
-                    InboxCard(item, now, state.myFix, canReply = state.safety.allowed && !state.tx.active) { actions.acknowledge(item) }
+                    InboxCard(item.copy(forwarded = "%02x-%x".format(item.frame.senderId, item.frame.sequence) in state.gateway.lastUploadedKeys), now, state.myFix, canReply = state.safety.allowed && !state.tx.active) { actions.acknowledge(item) }
                 }
             }
         }
@@ -605,9 +605,11 @@ private fun InboxCard(item: InboxItem, now: Long, myFix: Fix?, canReply: Boolean
                     fontSize = Type.body,
                     color = c.body,
                 )
-                if (item.relayState == RelayState.SENT) {
-                    Text("내 차도 이어서 전달했어요", fontSize = Type.meta, color = c.mute)
-                }
+                val notes = listOfNotNull(
+                    "내 차도 이어서 전달했어요".takeIf { item.relayState == RelayState.SENT },
+                    "구조 서버로 전달했어요".takeIf { item.forwarded },
+                )
+                if (notes.isNotEmpty()) Text(notes.joinToString(" · "), fontSize = Type.meta, color = c.mute)
             }
             Text(relativeTime(item.receivedAtMs, now), fontSize = Type.meta, color = c.mute)
         }
@@ -822,6 +824,21 @@ private fun SettingsSheet(state: UiState, actions: ScreenActions, onClose: () ->
                     actions.toggleVoice,
                     enabled = state.voiceAvailable,
                 )
+                SectionTitle("구조기관 전달")
+                InfoRow("통신이 돌아오면") {
+                    val g = state.gateway
+                    Text(
+                        when {
+                            !g.enabled -> "구조 서버가 아직 정해지지 않아 꺼져 있어요. 구조 요청 ${g.pending}건을 기기 안에 암호화해 7일간 보관해요"
+                            g.online && g.pending > 0 -> "인터넷 연결됨 · 구조 요청 ${g.pending}건을 구조 서버로 보내는 중이에요"
+                            g.online -> "인터넷 연결됨 · 보낼 구조 요청이 없어요"
+                            else -> "인터넷이 연결되면 구조 요청 ${g.pending}건을 구조 서버로 보내요"
+                        },
+                        fontSize = Type.body,
+                        color = c.ink,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
                 SectionTitle("시연")
                 Row(horizontalArrangement = Arrangement.spacedBy(Size.gap), modifier = Modifier.padding(vertical = 12.dp)) {
                     AppButton("다른 차 신호 받아 보기", actions.simulateIncoming, Kind.SECONDARY, Modifier.weight(1f))

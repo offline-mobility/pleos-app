@@ -16,6 +16,10 @@ android {
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Rescue server for forwarding stored messages (docs/GATEWAY_API.md). Blank = forwarding off.
+        // Must be https://. Override per build with -PgatewayUrl=https://...
+        buildConfigField("String", "GATEWAY_URL", "\"${project.findProperty("gatewayUrl") ?: ""}\"")
     }
 
     buildTypes {
