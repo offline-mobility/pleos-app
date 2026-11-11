@@ -13,6 +13,9 @@ import io.github.offlinemobility.app.core.acoustic.ModemConfig
 import io.github.offlinemobility.app.core.disaster.DisasterGuide
 import io.github.offlinemobility.app.core.disaster.DisasterGuides
 import io.github.offlinemobility.app.core.disaster.DisasterType
+import io.github.offlinemobility.app.core.energy.Endurance
+import io.github.offlinemobility.app.core.energy.EnduranceEstimate
+import io.github.offlinemobility.app.core.energy.EnergyReading
 import io.github.offlinemobility.app.core.light.Lamp
 import io.github.offlinemobility.app.core.light.LampGroup
 import io.github.offlinemobility.app.core.light.LightPattern
@@ -130,8 +133,11 @@ data class UiState(
     /** Read received messages aloud. */
     val voiceAnnounce: Boolean = true,
     val voiceAvailable: Boolean = false,
+    val energy: EnergyReading? = null,
 ) {
     val guide: DisasterGuide get() = DisasterGuides.of(disaster)
+
+    val endurance: EnduranceEstimate? get() = energy?.let { Endurance.estimate(it, lightsOn = lightUsable) }
 
     val safety: SafetyVerdict
         get() = SafetyGate.evaluate(VehicleSafetyState(gear), if (useLight) TransmitChannel.LIGHT else TransmitChannel.SOUND)
@@ -173,6 +179,7 @@ class SignalEngine(application: Application) {
     private var soundJob: Job? = null
     private var lightJob: Job? = null
     private var gearJob: Job? = null
+    private var energyJob: Job? = null
     private var inboxId = 0L
 
     /** True while blackout is on only because the air-raid mode turned it on. */
@@ -216,6 +223,16 @@ class SignalEngine(application: Application) {
 
             gearJob?.cancel()
             gearJob = launch { gateway.gear.collect(::onGear) }
+
+            energyJob?.cancel()
+            energyJob = launch {
+                while (true) {
+                    val reading = gateway.energy()
+                    _state.update { it.copy(energy = reading.takeIf { r -> r.evRemainingWh != null || r.fuelPercent != null }) }
+                    debugLog { "energy $reading" }
+                    delay(ENERGY_POLL_MS)
+                }
+            }
 
             val support = Lamp.entries.associateWith { gateway.lampSupport(it) }
             debugLog { "vehicle mode=$mode ${result.exceptionOrNull()?.message ?: ""} lamps=$support" }
@@ -583,6 +600,7 @@ class SignalEngine(application: Application) {
 
     private companion object {
         const val KEY_DISASTER = "disaster"
+        const val ENERGY_POLL_MS = 60_000L
         const val SOUND_REPEATS = 3
         const val SOUND_GAP_MS = 400L
         const val MAX_INBOX = 30

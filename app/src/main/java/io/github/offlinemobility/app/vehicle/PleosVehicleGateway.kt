@@ -8,6 +8,7 @@ import ai.pleos.playground.vehicle.constant.control.LightSwitch
 import ai.pleos.playground.vehicle.constant.control.VehicleGear
 import ai.pleos.playground.vehicle.listener.GearSelectionListener
 import android.content.Context
+import io.github.offlinemobility.app.core.energy.EnergyReading
 import io.github.offlinemobility.app.core.light.Lamp
 import io.github.offlinemobility.app.core.light.LampSwitch
 import io.github.offlinemobility.app.core.safety.GearState
@@ -23,7 +24,7 @@ import kotlin.coroutines.resume
  * Pleos Vehicle SDK 2.3.2 binding.
  *
  * Required manifest permissions: pleos.car.permission.CAR_LIGHTS (read / capability),
- * CONTROL_CAR_LIGHTS (set), CAR_DRIVE (gear). Every SDK call is IPC with callbacks, so each one is
+ * CONTROL_CAR_LIGHTS (set), CAR_DRIVE (gear), CAR_ENERGY (battery / fuel). Every SDK call is IPC with callbacks, so each one is
  * wrapped in a timeout to keep the UI responsive when the vehicle service does not answer.
  */
 class PleosVehicleGateway(context: Context) : VehicleGateway {
@@ -110,6 +111,13 @@ class PleosVehicleGateway(context: Context) : VehicleGateway {
             Lamp.TAIL_LAMP -> light.getCurrentTailLampLightState(done, fail)
         }
     }.map { it == LightState.ON || it == LightState.DAYTIME_RUNNING }
+
+    override suspend fun energy(): EnergyReading {
+        val level = call<Float> { done, fail -> vehicle.getEvBattery().getEvBatteryLevel(done, fail) }.getOrNull()
+        val soc = call<Int> { done, fail -> vehicle.getEvBattery().getEvBatteryStateOfCharge(done, fail) }.getOrNull()
+        val fuel = call<Int> { done, fail -> vehicle.getFuel().getFuelPercent(done, fail) }.getOrNull()
+        return EnergyReading(evRemainingWh = level?.toDouble(), evPercent = soc, fuelPercent = fuel)
+    }
 
     override fun release() {
         if (!initialized) return

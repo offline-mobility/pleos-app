@@ -1,5 +1,6 @@
 package io.github.offlinemobility.app.vehicle
 
+import io.github.offlinemobility.app.core.energy.EnergyReading
 import io.github.offlinemobility.app.core.light.Lamp
 import io.github.offlinemobility.app.core.light.LampSwitch
 import io.github.offlinemobility.app.core.safety.GearState
@@ -26,6 +27,9 @@ interface VehicleGateway {
 
     /** Actual lamp output reported by the vehicle, which can differ from the requested switch. */
     suspend fun isLampLit(lamp: Lamp): Result<Boolean>
+
+    /** Battery / fuel levels; fields the vehicle does not report stay null. */
+    suspend fun energy(): EnergyReading
     fun release()
 }
 
@@ -60,6 +64,8 @@ class SimulatedVehicleGateway : VehicleGateway {
     }
 
     override suspend fun isLampLit(lamp: Lamp): Result<Boolean> = Result.success(lamps.getValue(lamp) == LampSwitch.ON)
+
+    override suspend fun energy(): EnergyReading = EnergyReading(evRemainingWh = 54_000.0, evPercent = 70)
 
     override fun release() = Unit
 }

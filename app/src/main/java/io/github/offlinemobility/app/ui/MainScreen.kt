@@ -69,6 +69,7 @@ import io.github.offlinemobility.app.VehicleMode
 import io.github.offlinemobility.app.core.disaster.DisasterGuide
 import io.github.offlinemobility.app.core.disaster.DisasterType
 import io.github.offlinemobility.app.core.disaster.WindowAdvice
+import io.github.offlinemobility.app.core.energy.Endurance
 import io.github.offlinemobility.app.core.light.Lamp
 import io.github.offlinemobility.app.core.light.LampGroup
 import io.github.offlinemobility.app.core.light.LightPattern
@@ -186,7 +187,18 @@ private fun Header(state: UiState, onDisaster: () -> Unit, onSettings: () -> Uni
     Row(Modifier.fillMaxWidth().heightIn(min = 72.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(18.dp).clip(CircleShape).background(dot))
         Spacer(Modifier.width(14.dp))
-        Text(text, fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Column(Modifier.weight(1f, fill = false)) {
+            Text(text, fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            state.endurance?.let { e ->
+                Text(
+                    "${if (e.isEv) "배터리" else "연료"} ${e.percent}% · 지금처럼 쓰면 ${Endurance.hoursWord(e.hours)} 버틸 수 있어요 (추정, 냉난방 제외)",
+                    fontSize = Type.meta,
+                    color = if (e.low) c.help else c.mute,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
         if (state.vehicleMode == VehicleMode.SIMULATION) {
             Spacer(Modifier.width(14.dp))
             Tag("연습 모드", c.body, c.surface)
@@ -237,6 +249,25 @@ private fun SendArea(
             }
             if (state.disaster != DisasterType.GENERAL) {
                 GuideBanner(state.guide, onGuide)
+                Spacer(Modifier.height(Size.gap))
+            }
+            val endurance = state.endurance
+            if (endurance != null && endurance.low && state.lightEnabled) {
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 88.dp).clip(RoundedCornerShape(Size.radius))
+                        .background(LocalAppColors.current.helpSoft).padding(horizontal = 20.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "에너지가 얼마 남지 않았어요 · 불빛을 끄고 소리만 쓰면 더 오래 버틸 수 있어요",
+                        fontSize = Type.body,
+                        fontWeight = FontWeight.SemiBold,
+                        color = LocalAppColors.current.ink,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    AppButton("불빛 끄기", actions.toggleLight, Kind.SECONDARY, height = 64.dp)
+                }
                 Spacer(Modifier.height(Size.gap))
             }
             MessagePicker(state.guide.primary, enabled = state.safety.allowed, onPick = onPick, onMore = onMore, modifier = Modifier.weight(1f))
