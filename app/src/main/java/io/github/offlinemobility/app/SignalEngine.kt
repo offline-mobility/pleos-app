@@ -1,9 +1,6 @@
 package io.github.offlinemobility.app
 
 import android.app.Application
-import android.util.Log
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
 import io.github.offlinemobility.app.audio.AcousticReceiver
 import io.github.offlinemobility.app.audio.AcousticTransmitter
 import io.github.offlinemobility.app.core.acoustic.AcousticModem
@@ -29,7 +26,10 @@ import io.github.offlinemobility.app.vehicle.LightSignalRunner
 import io.github.offlinemobility.app.vehicle.PleosVehicleGateway
 import io.github.offlinemobility.app.vehicle.SimulatedVehicleGateway
 import io.github.offlinemobility.app.vehicle.VehicleGateway
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -121,7 +121,13 @@ data class UiState(
     val canTransmit: Boolean get() = safety.allowed && (useSound || lightUsable) && !tx.active
 }
 
-class MainViewModel(application: Application) : AndroidViewModel(application) {
+/**
+ * Owns every long-lived part of the app: vehicle connection, microphone receiver, speaker
+ * transmitter, relay policy and UI state. Lives for the whole process so reception and relaying
+ * keep running while the screen is closed (see [SignalService]).
+ */
+class SignalEngine(application: Application) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val config = ModemConfig()
     private val senderId = Random.nextInt(256)
     private var sequence = Random.nextInt(16)
@@ -144,15 +150,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         connectVehicle()
-        viewModelScope.launch { receiver.frames.collect(::onDecoded) }
-        viewModelScope.launch {
+        scope.launch { receiver.frames.collect(::onDecoded) }
+        scope.launch {
             var lastLog = 0L
             receiver.levelDb.collect { db ->
                 _state.update { it.copy(inputLevelDb = db) }
                 val now = System.currentTimeMillis()
                 if (now - lastLog > 2_000) {
                     lastLog = now
-                    Log.d(TAG, "mic level ${"%.1f".format(db)} dBFS")
+                    debugLog { "mic level ${"%.1f".format(db)} dBFS" }
                 }
             }
         }
@@ -160,7 +166,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun connectVehicle() {
         _state.update { it.copy(vehicleMode = VehicleMode.CONNECTING, vehicleMessage = "차량 서비스 연결 중") }
-        viewModelScope.launch {
+        scope.launch {
             val result = pleos.connect()
             gateway = if (result.isSuccess) pleos else simulated
             val mode = if (result.isSuccess) VehicleMode.PLEOS else VehicleMode.SIMULATION
@@ -172,13 +178,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             gearJob = launch { gateway.gear.collect(::onGear) }
 
             val support = Lamp.entries.associateWith { gateway.lampSupport(it) }
-            Log.i(TAG, "vehicle mode=$mode ${result.exceptionOrNull()?.message ?: ""} lamps=$support")
+            debugLog { "vehicle mode=$mode ${result.exceptionOrNull()?.message ?: ""} lamps=$support" }
             _state.update { it.copy(lampSupport = support) }
         }
     }
 
     private fun onGear(gear: GearState) {
-        Log.i(TAG, "gear=$gear")
+        debugLog { "gear=$gear" }
         _state.update { it.copy(gear = gear) }
         // Leaving P stops every outgoing signal immediately; lamps are restored by the runner.
         if (gear != GearState.PARK) stopTransmission("P단 해제로 송신을 중단했습니다")
@@ -210,7 +216,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startListening() {
-        val result = receiver.start(viewModelScope)
+        val result = receiver.start(scope)
         _state.update {
             it.copy(
                 listening = result.isSuccess,
@@ -238,7 +244,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!s.canTransmit) return
         sequence = (sequence + 1) % 16
         val frame = RescueFrame(s.selected, if (withPeople) s.people else 0, senderId, sequence)
-        Log.i(TAG, "transmit $frame sound=${s.useSound} light=${s.lightUsable} plan=${s.lightPlan}")
+        debugLog { "transmit $frame sound=${s.useSound} light=${s.lightUsable} plan=${s.lightPlan}" }
         relayPolicy.markSent(frame, System.currentTimeMillis())
         startTx(frame, s.lightPattern, soundRepeats = if (s.useSound) SOUND_REPEATS else 0)
     }
@@ -282,7 +288,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stopTransmission(reason: String = "보내기를 멈췄어요") {
         val wasActive = _state.value.tx.active
-        if (wasActive) Log.i(TAG, "stop: $reason")
+        if (wasActive) debugLog { "stop: $reason" }
         soundJob?.cancel()
         lightJob?.cancel()
         if (wasActive) {
@@ -305,14 +311,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun sendSound(frame: RescueFrame, repeats: Int) {
         val audio = AcousticModem.modulate(frame, config)
-        soundJob = viewModelScope.launch {
+        soundJob = scope.launch {
             _state.update { it.copy(tx = it.tx.copy(soundActive = true, soundProgress = 0f)) }
             var error: String? = null
             for (i in 0 until repeats) {
                 val result = transmitter.play(audio, config.sampleRate)
                 if (result.isFailure) {
                     error = result.exceptionOrNull()?.message
-                    Log.w(TAG, "sound failed: $error")
+                    debugLog { "sound failed: $error" }
                     break
                 }
                 _state.update { it.copy(tx = it.tx.copy(soundProgress = (i + 1f) / repeats, soundDone = i + 1)) }
@@ -332,12 +338,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun sendLight(pattern: LightPattern, plan: LightPlan) {
         val runner = LightSignalRunner(gateway)
-        lightJob = viewModelScope.launch {
+        lightJob = scope.launch {
             _state.update { it.copy(tx = it.tx.copy(lightActive = true, lightPattern = pattern, lightProgress = 0f)) }
             val report = runner.run(pattern, plan.flash, plan.steady) { step, total, on ->
                 _state.update { it.copy(tx = it.tx.copy(lightProgress = step.toFloat() / total, lightOn = on)) }
             }
-            Log.i(TAG, "light report $report")
+            debugLog { "light report $report" }
             val confirmed = report.litConfirmed.filterValues { it == true }.keys
             val unconfirmed = report.litConfirmed.filterValues { it != true }.keys
             val litText = buildList {
@@ -349,7 +355,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 "조명 제어 실패 ${report.failures}회 · 차량이 이 조명 제어를 허용하지 않습니다"
             }
-            Log.i(TAG, summary)
+            debugLog { summary }
             _state.update {
                 it.copy(
                     tx = it.tx.copy(
@@ -364,7 +370,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun onDecoded(signal: DecodedSignal) {
-        Log.i(TAG, "decoded ${signal.frame} snr=${"%.1f".format(signal.snrDb)} corrected=${signal.correctedSymbols}")
+        debugLog { "decoded ${signal.frame} snr=${"%.1f".format(signal.snrDb)} corrected=${signal.correctedSymbols}" }
         val now = System.currentTimeMillis()
         when (val decision = relayPolicy.onReceived(signal.frame, now)) {
             is RelayDecision.Duplicate -> bumpRepeat(decision.frame)
@@ -387,7 +393,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun scheduleRelay(itemId: Long, frame: RescueFrame, delayMs: Long) {
-        viewModelScope.launch {
+        scope.launch {
             delay(delayMs)
             // Relaying is acoustic only and still requires the vehicle to be parked.
             while (_state.value.tx.soundActive) delay(500)
@@ -451,19 +457,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             v += noise * sqrt(-2 * ln(u1)) * cos(2 * PI * random.nextDouble())
             v.toFloat()
         }
-        viewModelScope.launch { receiver.injectForDemo(audio) }
+        scope.launch { receiver.injectForDemo(audio) }
     }
 
-    override fun onCleared() {
-        receiver.stop()
-        soundJob?.cancel()
-        lightJob?.cancel()
-        pleos.release()
-        super.onCleared()
-    }
 
     private companion object {
-        const val TAG = "OfflineMobility"
         const val SOUND_REPEATS = 3
         const val SOUND_GAP_MS = 400L
         const val MAX_INBOX = 30

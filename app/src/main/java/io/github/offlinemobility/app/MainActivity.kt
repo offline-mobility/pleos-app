@@ -2,12 +2,12 @@ package io.github.offlinemobility.app
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.viewModels
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -17,43 +17,45 @@ import io.github.offlinemobility.app.ui.ScreenActions
 import io.github.offlinemobility.app.ui.asksPeople
 
 class MainActivity : ComponentActivity() {
-    private val viewModel: MainViewModel by viewModels()
+    private val engine: SignalEngine get() = (application as OfflineMobilityApp).engine
+
+    private val listenPermissions: Array<String>
+        get() = buildList {
+            add(Manifest.permission.RECORD_AUDIO)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
+        }.toTypedArray()
+
+    private fun hasMic() = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             AppTheme {
-                val state by viewModel.state.collectAsStateWithLifecycle()
-                val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-                    if (granted) viewModel.startListening() else viewModel.onMicPermissionDenied()
+                val state by engine.state.collectAsStateWithLifecycle()
+                val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+                    if (hasMic()) SignalService.start(this) else engine.onMicPermissionDenied()
                 }
-                LaunchedEffect(Unit) {
-                    if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                        viewModel.startListening()
-                    } else {
-                        micLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                    }
+                val startListening = {
+                    if (hasMic()) SignalService.start(this) else permissionLauncher.launch(listenPermissions)
                 }
+                LaunchedEffect(Unit) { if (!state.listening) startListening() }
                 MainScreen(
                     state = state,
                     actions = ScreenActions(
-                        send = { viewModel.send(it, withPeople = it.asksPeople) },
-                        people = viewModel::changePeople,
-                        stop = { viewModel.stopTransmission() },
-                        dismissResult = viewModel::dismissResult,
-                        acknowledge = viewModel::acknowledge,
-                        toggleListen = {
-                            if (state.listening) viewModel.stopListening()
-                            else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                        },
-                        toggleSound = viewModel::toggleSound,
-                        toggleLight = viewModel::toggleLight,
-                        lampGroup = viewModel::selectLampGroup,
-                        toggleBlackout = viewModel::toggleBlackout,
-                        toggleRelay = viewModel::toggleAutoRelay,
-                        simulateIncoming = viewModel::simulateIncoming,
-                        setGear = viewModel::setSimulatedGear,
-                        retryVehicle = viewModel::connectVehicle,
+                        send = { engine.send(it, withPeople = it.asksPeople) },
+                        people = engine::changePeople,
+                        stop = { engine.stopTransmission() },
+                        dismissResult = engine::dismissResult,
+                        acknowledge = engine::acknowledge,
+                        toggleListen = { if (state.listening) SignalService.stop(this) else startListening() },
+                        toggleSound = engine::toggleSound,
+                        toggleLight = engine::toggleLight,
+                        lampGroup = engine::selectLampGroup,
+                        toggleBlackout = engine::toggleBlackout,
+                        toggleRelay = engine::toggleAutoRelay,
+                        simulateIncoming = engine::simulateIncoming,
+                        setGear = engine::setSimulatedGear,
+                        retryVehicle = engine::connectVehicle,
                     ),
                 )
             }

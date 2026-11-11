@@ -1,6 +1,6 @@
 package io.github.offlinemobility.app.vehicle
 
-import android.util.Log
+import io.github.offlinemobility.app.debugLog
 import io.github.offlinemobility.app.core.light.Lamp
 import io.github.offlinemobility.app.core.light.LampSwitch
 import io.github.offlinemobility.app.core.light.LightPattern
@@ -25,9 +25,6 @@ data class LightRunReport(
  * including when the coroutine is cancelled (user stop, gear leaves P).
  */
 class LightSignalRunner(private val gateway: VehicleGateway) {
-    private companion object {
-        const val TAG = "OfflineMobility"
-    }
 
     suspend fun run(
         pattern: LightPattern,
@@ -42,7 +39,7 @@ class LightSignalRunner(private val gateway: VehicleGateway) {
         val originals = (touched + related).distinct()
             .mapNotNull { lamp -> gateway.readLamp(lamp).getOrNull()?.let { lamp to it } }
             .toMap()
-        Log.i(TAG, "originals=$originals")
+        debugLog { "originals=$originals" }
         val lit = lamps.associateWith<Lamp, Boolean?> { null }.toMutableMap()
         var failures = 0
         var latencyTotal = 0L

@@ -5,8 +5,16 @@ import io.github.offlinemobility.app.core.protocol.RescueMessage
 import kotlin.random.Random
 
 sealed interface RelayDecision {
-    /** First time this message is heard. [relay] is the frame to rebroadcast, if any. */
-    data class Fresh(val frame: RescueFrame, val relay: RescueFrame?, val relayDelayMs: Long) : RelayDecision
+    /**
+     * First time this message is heard. [relay] is the frame to rebroadcast, if any.
+     * [rateLimited] is true when relaying was skipped because the relay budget was used up.
+     */
+    data class Fresh(
+        val frame: RescueFrame,
+        val relay: RescueFrame?,
+        val relayDelayMs: Long,
+        val rateLimited: Boolean = false,
+    ) : RelayDecision
 
     /** Same origin message heard again (repeat or another relay). */
     data class Duplicate(val frame: RescueFrame) : RelayDecision
@@ -22,15 +30,19 @@ sealed interface RelayDecision {
  * - Hop limit [RescueFrame.MAX_HOP].
  * - Random backoff so neighbours that heard the same frame do not transmit at the same time.
  * - ACK is never relayed.
+ * - At most [maxRelaysPerMinute] relays per minute. Anyone can transmit, so a flood of fake
+ *   frames must not turn every listening car into an amplifier.
  */
 class RelayPolicy(
     private val ownSenderId: Int,
     private val dedupeWindowMs: Long = 10 * 60_000L,
     private val minBackoffMs: Long = 1_500L,
     private val maxBackoffMs: Long = 6_000L,
+    private val maxRelaysPerMinute: Int = 6,
     private val random: Random = Random.Default,
 ) {
     private val seen = LinkedHashMap<Int, Long>()
+    private val relayTimes = ArrayDeque<Long>()
     private val sentHop = HashMap<Int, Int>()
 
     fun onReceived(frame: RescueFrame, nowMs: Long): RelayDecision {
@@ -45,9 +57,13 @@ class RelayPolicy(
         if (seen.containsKey(key)) return RelayDecision.Duplicate(frame)
         seen[key] = nowMs
 
-        val relay = if (frame.message == RescueMessage.ACK) null else frame.relayed()
+        val candidate = if (frame.message == RescueMessage.ACK) null else frame.relayed()
+        while (relayTimes.isNotEmpty() && nowMs - relayTimes.first() >= 60_000L) relayTimes.removeFirst()
+        val limited = candidate != null && relayTimes.size >= maxRelaysPerMinute
+        val relay = if (limited) null else candidate
+        if (relay != null) relayTimes.addLast(nowMs)
         val delay = if (relay == null) 0L else random.nextLong(minBackoffMs, maxBackoffMs + 1)
-        return RelayDecision.Fresh(frame, relay, delay)
+        return RelayDecision.Fresh(frame, relay, delay, rateLimited = limited)
     }
 
     /** Remember our own transmissions so a reflected copy is not treated as new. */

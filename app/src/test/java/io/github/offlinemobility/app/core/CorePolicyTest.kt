@@ -105,4 +105,17 @@ class CorePolicyTest {
         val regulated = VehicleSafetyState(GearState.PARK, drivingRestricted = true)
         assertFalse(SafetyGate.evaluate(regulated, TransmitChannel.SOUND).allowed)
     }
+
+    @Test
+    fun relayBudgetPreventsAmplification() {
+        val policy = RelayPolicy(ownSenderId = 1, maxRelaysPerMinute = 6)
+        val decisions = (0 until 20).map { i ->
+            policy.onReceived(RescueFrame(RescueMessage.SOS, 0, senderId = 10 + i, sequence = 0), nowMs = i * 100L) as RelayDecision.Fresh
+        }
+        assertEquals(6, decisions.count { it.relay != null })
+        assertTrue(decisions.drop(6).all { it.rateLimited })
+        // Budget refills after a minute.
+        val later = policy.onReceived(RescueFrame(RescueMessage.SOS, 0, senderId = 99, sequence = 0), nowMs = 61_000L)
+        assertTrue((later as RelayDecision.Fresh).relay != null)
+    }
 }
