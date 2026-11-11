@@ -22,6 +22,8 @@ class MainActivity : ComponentActivity() {
     private val listenPermissions: Array<String>
         get() = buildList {
             add(Manifest.permission.RECORD_AUDIO)
+            add(Manifest.permission.ACCESS_FINE_LOCATION)
+            add(Manifest.permission.ACCESS_COARSE_LOCATION)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
         }.toTypedArray()
 
@@ -33,6 +35,7 @@ class MainActivity : ComponentActivity() {
             AppTheme {
                 val state by engine.state.collectAsStateWithLifecycle()
                 val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+                    engine.refreshLocation()
                     if (hasMic()) SignalService.start(this) else engine.onMicPermissionDenied()
                 }
                 val startListening = {
@@ -53,6 +56,7 @@ class MainActivity : ComponentActivity() {
                         lampGroup = engine::selectLampGroup,
                         toggleBlackout = engine::toggleBlackout,
                         toggleRelay = engine::toggleAutoRelay,
+                        toggleShareLocation = engine::toggleShareLocation,
                         simulateIncoming = engine::simulateIncoming,
                         setGear = engine::setSimulatedGear,
                         retryVehicle = engine::connectVehicle,

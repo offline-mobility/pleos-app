@@ -32,11 +32,16 @@ class SignalService : Service() {
         }
         val notification = buildNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            // Location type only when the user granted it; declaring a type without its permission throws.
+            val location = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            val types = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                (if (location) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0)
+            startForeground(NOTIFICATION_ID, notification, types)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
         engine.startListening()
+        engine.refreshLocation()
         return START_NOT_STICKY
     }
 

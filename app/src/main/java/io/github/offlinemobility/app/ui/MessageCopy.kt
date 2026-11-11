@@ -1,6 +1,7 @@
 package io.github.offlinemobility.app.ui
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.AltRoute
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CarCrash
@@ -10,9 +11,13 @@ import androidx.compose.material.icons.filled.Elderly
 import androidx.compose.material.icons.filled.Flood
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Landslide
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.LocalGasStation
+import androidx.compose.material.icons.filled.Masks
 import androidx.compose.material.icons.filled.MedicalServices
+import androidx.compose.material.icons.filled.Medication
+import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Sos
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.WaterDrop
@@ -53,6 +58,11 @@ val RescueMessage.copy: MessageCopy
         RescueMessage.RESCUE_TEAM -> MessageCopy("구조대 접근", "구조대가 오고 있어요", Icons.Filled.HealthAndSafety, Tone.SAFE)
         RescueMessage.ALL_SAFE -> MessageCopy("모두 안전", "우리 차 사람들은 괜찮아요", Icons.Filled.CheckCircle, Tone.SAFE)
         RescueMessage.ACK -> MessageCopy("잘 받았어요", "신호를 받았다는 응답", Icons.Filled.Done, Tone.NEUTRAL)
+        RescueMessage.COLD -> MessageCopy("추위·저체온", "몸이 너무 차가워요 · 난방이 필요해요", Icons.Filled.AcUnit, Tone.URGENT)
+        RescueMessage.COLLAPSE -> MessageCopy("붕괴·낙석", "건물이나 흙·돌이 무너졌어요", Icons.Filled.Landslide, Tone.URGENT)
+        RescueMessage.CBRN -> MessageCopy("화생방·방사능", "유독가스나 방사능 경보가 있어요", Icons.Filled.Masks, Tone.URGENT)
+        RescueMessage.FOOD -> MessageCopy("식량 필요", "먹을 것이 없어요", Icons.Filled.Restaurant, Tone.HELP)
+        RescueMessage.MEDICINE -> MessageCopy("약 필요", "꼭 먹어야 할 약이 떨어졌어요", Icons.Filled.Medication, Tone.HELP)
     }
 
 /** Messages on the first screen: the most urgent ones. */
@@ -64,13 +74,16 @@ val PrimaryMessages = listOf(
     RescueMessage.WATER,
 )
 
-/** Remaining messages grouped for the "다른 메시지" sheet. */
+/** Remaining messages grouped for the "다른 메시지" sheet (at most three per row). */
 val MoreMessageGroups = listOf(
-    "위험" to listOf(RescueMessage.HAZARD),
-    "도움 필요" to listOf(RescueMessage.VULNERABLE, RescueMessage.POWER),
+    "위험" to listOf(RescueMessage.HAZARD, RescueMessage.COLLAPSE, RescueMessage.CBRN),
+    "사람" to listOf(RescueMessage.VULNERABLE, RescueMessage.COLD, RescueMessage.MEDICINE),
+    "물자" to listOf(RescueMessage.FOOD, RescueMessage.POWER),
     "길·대피" to listOf(RescueMessage.ROAD_BLOCKED, RescueMessage.ROUTE_CLEAR, RescueMessage.SHELTER),
     "안전" to listOf(RescueMessage.RESCUE_TEAM, RescueMessage.ALL_SAFE),
 )
+
+val MoreMessageCount: Int get() = MoreMessageGroups.sumOf { it.second.size }
 
 @Composable
 fun Tone.strong(): Color {

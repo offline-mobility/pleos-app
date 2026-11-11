@@ -1,5 +1,6 @@
 package io.github.offlinemobility.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -69,7 +70,10 @@ import io.github.offlinemobility.app.core.light.Lamp
 import io.github.offlinemobility.app.core.light.LampGroup
 import io.github.offlinemobility.app.core.light.LightPattern
 import io.github.offlinemobility.app.core.light.LightPatterns
+import io.github.offlinemobility.app.core.protocol.Geo
+import io.github.offlinemobility.app.core.protocol.RescueFrame
 import io.github.offlinemobility.app.core.protocol.RescueMessage
+import io.github.offlinemobility.app.location.Fix
 import io.github.offlinemobility.app.core.safety.GearState
 import io.github.offlinemobility.app.vehicle.LampSupport
 import kotlinx.coroutines.delay
@@ -86,6 +90,7 @@ class ScreenActions(
     val lampGroup: (LampGroup) -> Unit,
     val toggleBlackout: () -> Unit,
     val toggleRelay: () -> Unit,
+    val toggleShareLocation: () -> Unit,
     val simulateIncoming: () -> Unit,
     val setGear: (GearState) -> Unit,
     val retryVehicle: () -> Unit,
@@ -109,6 +114,8 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
         pending = it
         overlay = Overlay.CONFIRM
     }
+    // The back key closes an open sheet first instead of leaving the app.
+    BackHandler(enabled = overlay != Overlay.NONE) { overlay = Overlay.NONE }
 
     Box(Modifier.fillMaxSize().background(c.page)) {
         Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 20.dp)) {
@@ -135,6 +142,7 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
                     state = state,
                     message = message,
                     onPeople = actions.people,
+                    onToggleLocation = actions.toggleShareLocation,
                     onCancel = { overlay = Overlay.NONE },
                     onSend = {
                         overlay = Overlay.NONE
@@ -248,7 +256,7 @@ private fun MessagePicker(enabled: Boolean, onPick: (RescueMessage) -> Unit, onM
                 icon = Icons.Filled.Apps,
                 iconTint = c.body,
                 title = "다른 메시지",
-                detail = "9가지 더 보기",
+                detail = "${MoreMessageCount}가지 더 보기",
                 enabled = enabled,
                 onClick = onMore,
                 modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -476,7 +484,7 @@ private fun InboxArea(state: UiState, actions: ScreenActions, now: Long, modifie
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(items, key = { it.id }) { item ->
-                    InboxCard(item, now, canReply = state.safety.allowed && !state.tx.active) { actions.acknowledge(item) }
+                    InboxCard(item, now, state.myFix, canReply = state.safety.allowed && !state.tx.active) { actions.acknowledge(item) }
                 }
             }
         }
@@ -500,7 +508,7 @@ private fun ListenToggle(listening: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun InboxCard(item: InboxItem, now: Long, canReply: Boolean, onReply: () -> Unit) {
+private fun InboxCard(item: InboxItem, now: Long, myFix: Fix?, canReply: Boolean, onReply: () -> Unit) {
     val c = LocalAppColors.current
     val copy = item.frame.message.copy
     val urgent = copy.tone == Tone.URGENT
@@ -522,7 +530,11 @@ private fun InboxCard(item: InboxItem, now: Long, canReply: Boolean, onReply: ()
                     fontWeight = FontWeight.Bold,
                     color = c.ink,
                 )
-                Text(routeText(item.frame.hop), fontSize = Type.body, color = c.body)
+                Text(
+                    listOfNotNull(routeText(item.frame.hop), whereText(item.frame, myFix)).joinToString(" · "),
+                    fontSize = Type.body,
+                    color = c.body,
+                )
                 if (item.relayState == RelayState.SENT) {
                     Text("내 차도 이어서 전달했어요", fontSize = Type.meta, color = c.mute)
                 }
@@ -578,6 +590,7 @@ private fun ConfirmSheet(
     state: UiState,
     message: RescueMessage,
     onPeople: (Int) -> Unit,
+    onToggleLocation: () -> Unit,
     onCancel: () -> Unit,
     onSend: () -> Unit,
 ) {
@@ -605,6 +618,24 @@ private fun ConfirmSheet(
             }
             InfoRow("보내는 방법") {
                 Text(methodText(state, message), fontSize = Type.body, fontWeight = FontWeight.SemiBold, color = c.ink)
+            }
+            Divider()
+            InfoRow("내 위치") {
+                Text(
+                    locationText(state),
+                    fontSize = Type.body,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (state.shareLocation && state.myFix != null) c.ink else c.body,
+                    modifier = Modifier.weight(1f),
+                )
+                if (state.locationPermission) {
+                    Switch(
+                        checked = state.shareLocation,
+                        onCheckedChange = { onToggleLocation() },
+                        modifier = Modifier.scale(1.4f).padding(end = 12.dp),
+                        colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
+                    )
+                }
             }
             Divider()
             Spacer(Modifier.height(28.dp))
@@ -692,6 +723,14 @@ private fun SettingsSheet(state: UiState, actions: ScreenActions, onClose: () ->
                     "공습경보 같은 상황에서 불빛을 쓰지 않고 소리로만 보내요.",
                     state.blackout,
                     actions.toggleBlackout,
+                )
+                SwitchRow(
+                    "내 위치 함께 보내기",
+                    if (state.locationPermission) "구조대가 찾아올 수 있게 GPS 위치(약 40m 범위)를 같이 보내요. 보낼 때만 나가요."
+                    else "위치 권한이 없어요. 기기 설정에서 위치 권한을 허용하면 쓸 수 있어요.",
+                    state.shareLocation && state.locationPermission,
+                    actions.toggleShareLocation,
+                    enabled = state.locationPermission,
                 )
                 SectionTitle("받은 신호")
                 SwitchRow("다음 차량으로 이어서 전달", "받은 신호를 잠시 뒤 내 차에서도 다시 보내 더 멀리 퍼지게 해요.", state.autoRelay, actions.toggleRelay)
@@ -842,4 +881,19 @@ fun AppButton(
         }
         Text(text, fontSize = fontSize, fontWeight = FontWeight.Bold, color = fg, maxLines = 1)
     }
+}
+
+private fun locationText(state: UiState): String = when {
+    !state.locationPermission -> "위치 권한이 없어 위치 없이 보내요"
+    !state.shareLocation -> "보내지 않아요"
+    state.myFix == null -> "위치를 찾는 중 · 못 찾으면 위치 없이 보내요"
+    else -> "함께 보내요 (약 40m 범위)"
+}
+
+/** "북동쪽 약 300m" from our own fix to the sender, or a hint when one side is unknown. */
+private fun whereText(frame: RescueFrame, myFix: Fix?): String? {
+    val cell = frame.location ?: return null
+    if (myFix == null) return "위치 받음"
+    val offset = Geo.offset(myFix.latitude, myFix.longitude, cell.latitude, cell.longitude)
+    return if (offset.meters < 50) "아주 가까이" else "${Geo.compassWord(offset.bearingDeg)} ${Geo.distanceWord(offset.meters)}"
 }

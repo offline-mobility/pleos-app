@@ -1,5 +1,6 @@
 package io.github.offlinemobility.app.core.acoustic
 
+import io.github.offlinemobility.app.core.protocol.GeoCell
 import io.github.offlinemobility.app.core.protocol.RescueFrame
 import io.github.offlinemobility.app.core.protocol.RescueMessage
 import org.junit.Assume.assumeTrue
@@ -24,11 +25,11 @@ class WavFixtureExport {
         val out = File(dir!!).apply { mkdirs() }
         val config = ModemConfig()
         val frames = listOf(
-            RescueFrame(RescueMessage.MEDICAL, people = 2, senderId = 0xA1, sequence = 1),
-            RescueFrame(RescueMessage.TRAPPED, people = 4, senderId = 0xB2, sequence = 2, hop = 1),
-            RescueFrame(RescueMessage.WATER, people = 3, senderId = 0xC3, sequence = 3),
-            RescueFrame(RescueMessage.ROAD_BLOCKED, people = 1, senderId = 0xD4, sequence = 4, hop = 2),
-            RescueFrame(RescueMessage.SHELTER, people = 15, senderId = 0xE5, sequence = 5),
+            RescueFrame(RescueMessage.MEDICAL, people = 2, senderId = 0xA1, sequence = 1, location = GeoCell.of(37.5006, 127.0302)),
+            RescueFrame(RescueMessage.TRAPPED, people = 4, senderId = 0xB2, sequence = 2, hop = 1, location = GeoCell.of(37.4940, 127.0240)),
+            RescueFrame(RescueMessage.COLD, people = 3, senderId = 0xC3, sequence = 3, location = GeoCell.of(37.4990, 127.0350)),
+            RescueFrame(RescueMessage.ROAD_BLOCKED, people = 0, senderId = 0xD4, sequence = 4, hop = 2),
+            RescueFrame(RescueMessage.SHELTER, people = 0, senderId = 0xE5, sequence = 5, location = GeoCell.of(37.4960, 127.0290)),
         )
         val silence = FloatArray(config.ms(700))
         val manifest = StringBuilder()

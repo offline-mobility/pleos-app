@@ -42,7 +42,7 @@ data class ModemConfig(
     val rampSamples: Int get() = ms(rampMs)
     val slotSamples: Int get() = symbolSamples + guardSamples
     val frameSamples: Int
-        get() = chirpSamples + gapSamples + RescueFrameCodec.CODEWORD_SYMBOLS * slotSamples
+        get() = chirpSamples + gapSamples + RescueFrameCodec.FRAME_SYMBOLS * slotSamples
     val frameDurationMs: Long get() = frameSamples * 1000L / sampleRate
 
     fun toneHz(symbol: Int, slot: Int = 0): Double =
@@ -112,8 +112,8 @@ data class DecodedSignal(
  *
  * Sync: FFT overlap-save matched filter against the chirp, normalized by local energy so the
  * threshold is independent of gain. Demodulation: Goertzel per tone on each symbol slot.
- * Error control: generalized minimum distance decoding — retry RS with the least confident
- * symbols marked as erasures (0, 2, 4, 6), accept only CRC-valid results.
+ * Error control: per-symbol confidences go to [RescueFrameCodec.decode], which runs generalized
+ * minimum distance decoding on each interleaved RS codeword and accepts only CRC-valid results.
  */
 class AcousticDecoder(
     private val config: ModemConfig = ModemConfig(),
@@ -242,7 +242,7 @@ class AcousticDecoder(
     }
 
     private fun demodulate(syncAt: Long, syncScore: Double): DecodedSignal? {
-        val symbolsCount = RescueFrameCodec.CODEWORD_SYMBOLS
+        val symbolsCount = RescueFrameCodec.FRAME_SYMBOLS
         val symbols = IntArray(symbolsCount)
         val confidence = DoubleArray(symbolsCount)
         val skipStart = config.ms(config.analysisSkipStartMs)
@@ -287,24 +287,16 @@ class AcousticDecoder(
             otherPower += (total - bestPower) / (config.tones - 1)
         }
 
-        val order = confidence.indices.sortedBy { confidence[it] }
-        val dead = confidence.count { it == 0.0 }
-        if (dead > RescueFrameCodec.PARITY_SYMBOLS) return null
-        for (erasureCount in intArrayOf(0, 2, 4, 6)) {
-            if (erasureCount < dead) continue
-            val erasures = order.take(erasureCount).toIntArray()
-            val decoded = RescueFrameCodec.decode(symbols, erasures) ?: continue
-            val snr = if (otherPower <= 0.0) 99.0 else 10 * log10(signalPower / otherPower)
-            return DecodedSignal(
-                frame = decoded.frame,
-                startSample = syncAt,
-                syncScore = syncScore,
-                snrDb = snr,
-                correctedSymbols = decoded.correctedSymbols,
-                erasuresUsed = erasureCount,
-            )
-        }
-        return null
+        val decoded = RescueFrameCodec.decode(symbols, confidence) ?: return null
+        val snr = if (otherPower <= 0.0) 99.0 else 10 * log10(signalPower / otherPower)
+        return DecodedSignal(
+            frame = decoded.frame,
+            startSample = syncAt,
+            syncScore = syncScore,
+            snrDb = snr,
+            correctedSymbols = decoded.correctedSymbols,
+            erasuresUsed = decoded.erasuresUsed,
+        )
     }
 
     private fun ensureCapacity(required: Int) {

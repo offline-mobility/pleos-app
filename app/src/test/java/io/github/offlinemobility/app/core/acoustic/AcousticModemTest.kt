@@ -38,8 +38,15 @@ class AcousticModemTest {
     private fun rms(x: FloatArray): Double = sqrt(x.sumOf { it.toDouble() * it } / x.size)
 
     @Test
-    fun frameDurationIsUnderTwoSeconds() {
-        assertTrue(config.frameDurationMs < 2_000)
+    fun frameDurationIsUnderFourSeconds() {
+        assertTrue(config.frameDurationMs < 3_500)
+    }
+
+    @Test
+    fun locationSurvivesTheAirPath() {
+        val located = frame.copy(location = io.github.offlinemobility.app.core.protocol.GeoCell.of(37.5006, 127.0367))
+        val signal = silence(300) + AcousticModem.modulate(located, config) + silence(400)
+        assertEquals(listOf(located), decodeAll(signal).map { it.frame })
     }
 
     @Test

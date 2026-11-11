@@ -12,7 +12,10 @@ import io.github.offlinemobility.app.core.light.LightPattern
 import io.github.offlinemobility.app.core.light.LightPlan
 import io.github.offlinemobility.app.core.light.LightPlanner
 import io.github.offlinemobility.app.core.light.LightPatterns
+import io.github.offlinemobility.app.core.protocol.GeoCell
 import io.github.offlinemobility.app.core.protocol.RescueFrame
+import io.github.offlinemobility.app.location.Fix
+import io.github.offlinemobility.app.location.LocationTracker
 import io.github.offlinemobility.app.core.protocol.RescueMessage
 import io.github.offlinemobility.app.core.relay.RelayDecision
 import io.github.offlinemobility.app.core.relay.RelayPolicy
@@ -108,6 +111,11 @@ data class UiState(
     val inbox: List<InboxItem> = emptyList(),
     val tx: TxState = TxState(),
     val senderId: Int = 0,
+    /** Own GPS fix, if known and recent. */
+    val myFix: Fix? = null,
+    val locationPermission: Boolean = false,
+    /** Attach the car's position to outgoing messages. */
+    val shareLocation: Boolean = true,
 ) {
     val safety: SafetyVerdict
         get() = SafetyGate.evaluate(VehicleSafetyState(gear), if (useLight) TransmitChannel.LIGHT else TransmitChannel.SOUND)
@@ -138,6 +146,7 @@ class SignalEngine(application: Application) {
 
     private val transmitter = AcousticTransmitter(application)
     private val receiver = AcousticReceiver(application, config)
+    private val locationTracker = LocationTracker(application)
     private val relayPolicy = RelayPolicy(ownSenderId = senderId)
 
     private val _state = MutableStateFlow(UiState(senderId = senderId))
@@ -149,6 +158,8 @@ class SignalEngine(application: Application) {
     private var inboxId = 0L
 
     init {
+        scope.launch { locationTracker.fix.collect { fix -> _state.update { it.copy(myFix = fix) } } }
+        refreshLocation()
         connectVehicle()
         scope.launch { receiver.frames.collect(::onDecoded) }
         scope.launch {
@@ -202,6 +213,21 @@ class SignalEngine(application: Application) {
 
     fun toggleAutoRelay() = _state.update { it.copy(autoRelay = !it.autoRelay) }
 
+    fun toggleShareLocation() = _state.update { it.copy(shareLocation = !it.shareLocation) }
+
+    /** Starts GPS when permission is available (called again after the user grants it). */
+    fun refreshLocation() {
+        val granted = locationTracker.hasPermission()
+        _state.update { it.copy(locationPermission = granted) }
+        if (granted) locationTracker.start()
+    }
+
+    private fun outgoingLocation(): GeoCell? {
+        if (!_state.value.shareLocation) return null
+        val fix = locationTracker.current() ?: return null
+        return GeoCell.of(fix.latitude, fix.longitude)
+    }
+
     fun toggleBlackout() {
         val turningOn = !_state.value.blackout
         if (turningOn && _state.value.tx.lightActive) {
@@ -243,7 +269,7 @@ class SignalEngine(application: Application) {
         val s = _state.value
         if (!s.canTransmit) return
         sequence = (sequence + 1) % 16
-        val frame = RescueFrame(s.selected, if (withPeople) s.people else 0, senderId, sequence)
+        val frame = RescueFrame(s.selected, if (withPeople) s.people else 0, senderId, sequence, location = outgoingLocation())
         debugLog { "transmit $frame sound=${s.useSound} light=${s.lightUsable} plan=${s.lightPlan}" }
         relayPolicy.markSent(frame, System.currentTimeMillis())
         startTx(frame, s.lightPattern, soundRepeats = if (s.useSound) SOUND_REPEATS else 0)
@@ -253,7 +279,7 @@ class SignalEngine(application: Application) {
         val s = _state.value
         if (!s.safety.allowed || s.tx.active) return
         sequence = (sequence + 1) % 16
-        val ack = RescueFrame(RescueMessage.ACK, s.people, senderId, sequence)
+        val ack = RescueFrame(RescueMessage.ACK, s.people, senderId, sequence, location = outgoingLocation())
         relayPolicy.markSent(ack, System.currentTimeMillis())
         _state.update { st -> st.copy(inbox = st.inbox.map { if (it.id == item.id) it.copy(acknowledged = true) else it }) }
         startTx(ack, LightPatterns.REPLY, soundRepeats = if (s.useSound) 2 else 0)
@@ -443,6 +469,7 @@ class SignalEngine(application: Application) {
             senderId = (senderId + 1 + random.nextInt(254)) % 256,
             sequence = random.nextInt(16),
             hop = random.nextInt(2),
+            location = demoLocation(random),
         )
         val tx = AcousticModem.modulate(frame, config)
         val lead = config.ms(200)
@@ -460,6 +487,18 @@ class SignalEngine(application: Application) {
         scope.launch { receiver.injectForDemo(audio) }
     }
 
+
+    /** A point 100–900 m away from our own fix (or central Seoul when we have none). */
+    private fun demoLocation(random: Random): GeoCell {
+        val base = locationTracker.current()
+        val lat0 = base?.latitude ?: 37.5665
+        val lon0 = base?.longitude ?: 126.9780
+        val distance = random.nextDouble(100.0, 900.0)
+        val bearing = random.nextDouble(0.0, 2 * PI)
+        val dLat = distance * cos(bearing) / 111_320.0
+        val dLon = distance * kotlin.math.sin(bearing) / (111_320.0 * cos(Math.toRadians(lat0)))
+        return GeoCell.of(lat0 + dLat, lon0 + dLon)
+    }
 
     private companion object {
         const val SOUND_REPEATS = 3
