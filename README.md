@@ -10,7 +10,8 @@
 - **재난 유형 모드 13종:** 공식 국민행동요령 기반의 차 안 행동요령을 오프라인으로 보여 주고, 상황에 맞는 메시지와 앱 동작(공습 시 등화관제, 화학사고 시 창문 닫기 안내)을 바꿉니다.
 - **사람에게 직접 알리기:** 위급 메시지 뒤에 사람이 알아듣는 SOS 소리를 붙이고, 받은 신호를 음성으로 읽어 줍니다.
 - **차량 에너지:** 배터리·연료 잔량으로 신호 지속 시간을 추정하고, 부족하면 불빛을 끄도록 안내합니다.
-- **구조기관 전달:** 받은 구조 요청을 기기 안에 암호화해 두었다가, 통신이 돌아오면 구조 서버로 HTTPS 전송합니다.
+- **통신이 살아 있을 때:** 긴급재난문자를 받아 맞는 재난 모드를 제안하고, 주변 대피소를 기기에 받아 둡니다. 구조 요청은 구조 서버로도 보내고, 서버의 구조 상황판(지도)에 표시됩니다.
+- **통신이 돌아왔을 때:** 끊긴 동안 받은 구조 요청을 기기 안에 암호화해 두었다가 구조 서버로 HTTPS 전송합니다.
 - **화면 밖 수신:** 포그라운드 서비스로 앱을 내려도 수신·중계를 계속합니다.
 - **안전 잠금:** P단에서만 송신하고, P단을 벗어나면 즉시 중단하고 조명을 원래대로 되돌립니다.
 
@@ -30,7 +31,11 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 17)
 ./gradlew testDebugUnitTest assembleDebug
 
 # release (R8 축소·서명). 서명 키는 저장소에 없으며 keystore.properties로 지정합니다.
-./gradlew assembleRelease -PgatewayUrl=https://구조서버주소   # 서버 주소를 비우면 구조 서버 전달이 꺼집니다
+./gradlew assembleRelease -PserverUrl=https://구조서버주소   # 비우면 온라인 기능이 꺼집니다
+
+# 구조 서버 (로컬)
+cd server && cp .env.example .env && npm run dev   # http://localhost:8787
+./gradlew assembleDebug -PserverUrl=http://10.0.2.2:8787   # 에뮬레이터에서 로컬 서버 사용
 ```
 
 ## 테스트 환경 및 필요한 설정
@@ -71,8 +76,10 @@ app/src/main/java/.../
   core/energy/     배터리·연료 기반 지속 시간 추정
   core/gateway/    구조 서버 전송 형식
   gateway/         암호화 보관함, HTTPS 전송
+  online/, net/    재난문자·대피소·주변 구조 요청 동기화, 서버 통신
   location/        GPS
   audio/           AudioTrack 송신(오디오 포커스), AudioRecord 수신
+server/               구조 서버와 구조 상황판 (Node, Vercel)
 docs/
   PROPOSAL.md         기획서 초안
   UI_DESIGN.md        화면 설계

@@ -1,5 +1,7 @@
 # 구조 서버 API 명세
 
+구현: `server/` (Node 20 이상, 외부 패키지 없음). 로컬 실행 `cd server && cp .env.example .env && npm run dev`, 테스트 `npm test`.
+
 통신이 끊긴 구역에서 차량끼리 소리로 주고받은 구조 요청을, 통신이 살아난 차량이 구조 서버로 올린다. 서버는 받은 요청을 모아 구조기관 화면이나 재난방송 연계 시스템에 넘긴다.
 
 ## 앱 동작
@@ -7,13 +9,13 @@
 - 차량은 받은 구조 요청과 자기가 보낸 요청을 기기 안에 암호화해 보관한다(최대 7일, 500건).
 - 인터넷 연결이 확인되면(`NET_CAPABILITY_VALIDATED`) 50건씩 POST한다.
 - 성공(2xx 또는 409)하면 해당 건을 보관함에서 지운다. 실패하면 5초부터 최대 5분까지 간격을 두 배씩 늘려 다시 보낸다.
-- 서버 주소는 빌드 설정 `GATEWAY_URL`로 넣는다(`./gradlew assembleRelease -PgatewayUrl=https://...`). 비어 있으면 전송 기능은 꺼진다.
+- 서버 주소는 빌드 설정 `SERVER_URL`로 넣는다(`./gradlew assembleRelease -PserverUrl=https://...`). 비어 있으면 온라인 기능은 모두 꺼진다. 디버그 빌드만 로컬 서버(`http://10.0.2.2:포트`)를 허용한다.
 - 앱에는 비밀 키가 없다. 서버는 모든 요청을 신뢰할 수 없는 입력으로 다룬다.
 
 ## 요청
 
 ```
-POST {GATEWAY_URL}
+POST {SERVER_URL}/api/reports
 Content-Type: application/json; charset=utf-8
 ```
 
@@ -68,3 +70,36 @@ Content-Type: application/json; charset=utf-8
 - 요청 크기는 64KB, `reports`는 50건 이하로 제한한다.
 - `reporter`별, IP별 요청 횟수를 제한한다. 소리 신호는 누구나 보낼 수 있으므로, 같은 내용을 여러 `reporter`가 올렸는지를 신뢰도 판단에 쓴다.
 - 위치는 민감정보다. 구조 목적 외 접근을 막고, 보관 기간을 정해 지운다.
+
+## 그 밖의 API
+
+앱은 위치를 소수 둘째 자리(약 1km)로 줄여 보낸다.
+
+| 요청 | 설명 | 응답 |
+|---|---|---|
+| `GET /api/alerts?lat&lon` | 그 지역의 최근 24시간 긴급재난문자. 지역은 가장 가까운 대피소 주소로 판단 | `{source, region, alerts:[{id, createdAt, text, level, type}]}`. `type`은 앱의 재난 모드 이름 또는 null |
+| `GET /api/shelters?lat&lon&km` | 주변 대피소(기본 5km, 최대 30km), 가까운 순 | `{source, shelters:[{id, name, kind, lat, lon, address, capacity, distanceM}]}` |
+| `GET /api/reports/nearby?lat&lon&km` | 주변 구조 요청(기본 5km, 최대 10km) | `{incidents:[…]}` |
+| `GET /api/incidents` | 전체 구조 요청. `Authorization: Bearer {DASHBOARD_TOKEN}` 필요. 토큰이 없으면 꺼짐(503) | `{incidents:[{uid, id, message, people, hop, lat, lon, firstHeardAt, lastHeardAt, fromSender, confirmations}]}` |
+| `GET /api/health` | 설정 상태 | `{ok, alerts, shelters, dashboard}` |
+| `GET /` | 구조 상황판(지도) | HTML |
+
+`source`: `live`(공공 API), `sample`(`SAMPLE_DATA=1`인 개발 서버의 견본), `unconfigured`(키 없음, 빈 목록).
+
+## 공공 데이터
+
+| 데이터 | API | 환경변수 |
+|---|---|---|
+| 행정안전부 긴급재난문자 | safetydata.go.kr `DSSP-IF-00247` | `SAFETYDATA_ALERT_KEY` |
+| 통합대피소 (한파쉼터·무더위쉼터·지진옥외대피장소·지진해일긴급대피장소) | `DSSP-IF-10941` | `SAFETYDATA_SHELTER_KEY` |
+
+- 재난문자는 2분, 대피소는 약 1km 칸마다 24시간 캐시한다.
+- 서비스 키는 서버에만 둔다. 오류 응답에 키나 외부 주소를 싣지 않는다.
+- 통합대피소에는 민방위 대피소와 수용 인원이 없다. 민방위 대피소(`DSSP-IF-10166`)는 키 발급 후 추가한다.
+
+## 배포 (Vercel)
+
+1. `cd server && vercel login && vercel link` (프로젝트 이름에 개인 정보가 들어가지 않게 한다)
+2. 환경변수 등록: `SAFETYDATA_ALERT_KEY`, `SAFETYDATA_SHELTER_KEY`, `DASHBOARD_TOKEN`(`openssl rand -hex 32`), Upstash Redis의 `UPSTASH_REDIS_REST_URL`·`UPSTASH_REDIS_REST_TOKEN`. `SAMPLE_DATA`는 넣지 않는다.
+3. `vercel deploy --prod` 후 `https://…/api/health` 확인
+4. 앱 빌드: `./gradlew assembleRelease -PserverUrl=https://배포주소`

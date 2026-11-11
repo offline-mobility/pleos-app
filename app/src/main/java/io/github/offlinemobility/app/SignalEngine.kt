@@ -17,7 +17,12 @@ import io.github.offlinemobility.app.core.energy.Endurance
 import io.github.offlinemobility.app.core.energy.EnduranceEstimate
 import io.github.offlinemobility.app.core.energy.EnergyReading
 import io.github.offlinemobility.app.core.gateway.RescueReport
+import io.github.offlinemobility.app.core.online.OfficialAlert
+import io.github.offlinemobility.app.core.online.RemoteIncident
 import io.github.offlinemobility.app.gateway.GatewayStatus
+import io.github.offlinemobility.app.net.ServerClient
+import io.github.offlinemobility.app.online.OnlineState
+import io.github.offlinemobility.app.online.OnlineSync
 import io.github.offlinemobility.app.gateway.GatewayUploader
 import io.github.offlinemobility.app.gateway.RescueOutbox
 import io.github.offlinemobility.app.core.light.Lamp
@@ -61,7 +66,7 @@ import kotlin.random.Random
 
 enum class VehicleMode { CONNECTING, PLEOS, SIMULATION }
 
-enum class InboxKind { NEW, ECHO }
+enum class InboxKind { NEW, ECHO, SERVER }
 
 data class InboxItem(
     val id: Long,
@@ -75,6 +80,9 @@ data class InboxItem(
     val acknowledged: Boolean = false,
     /** Uploaded to the rescue server by this car. */
     val forwarded: Boolean = false,
+    /** For [InboxKind.SERVER]: the server's incident id and how many cars reported it. */
+    val serverUid: String? = null,
+    val confirmations: Int = 0,
 )
 
 enum class RelayState(val label: String) {
@@ -141,8 +149,13 @@ data class UiState(
     val voiceAvailable: Boolean = false,
     val energy: EnergyReading? = null,
     val gateway: GatewayStatus = GatewayStatus(enabled = false),
+    val online: OnlineState = OnlineState(),
+    val dismissedAlerts: Set<String> = emptySet(),
 ) {
     val guide: DisasterGuide get() = DisasterGuides.of(disaster)
+
+    /** Newest official message the user has not closed yet. */
+    val topAlert: OfficialAlert? get() = online.alerts.firstOrNull { it.id !in dismissedAlerts }
 
     val endurance: EnduranceEstimate? get() = energy?.let { Endurance.estimate(it, lightsOn = lightUsable) }
 
@@ -178,7 +191,15 @@ class SignalEngine(application: Application) {
     private val locationTracker = LocationTracker(application)
     private val announcer = VoiceAnnouncer(application, scope)
     private val outbox = RescueOutbox(application)
-    private val uploader = GatewayUploader(application, outbox, BuildConfig.GATEWAY_URL, scope)
+    private val server = ServerClient(BuildConfig.SERVER_URL)
+    private val uploader = GatewayUploader(application, outbox, server, scope)
+    private val onlineSync = OnlineSync(
+        application,
+        server,
+        scope,
+        isOnline = { _state.value.gateway.online },
+        position = { locationTracker.current() },
+    )
     private val prefs = application.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
     private val relayPolicy = RelayPolicy(ownSenderId = senderId)
 
@@ -191,11 +212,49 @@ class SignalEngine(application: Application) {
     private var energyJob: Job? = null
     private var inboxId = 0L
 
+    fun dismissAlert(id: String) = _state.update { it.copy(dismissedAlerts = it.dismissedAlerts + id) }
+
+    /** Switches to the disaster mode an official message points to. */
+    fun acceptAlert(alert: OfficialAlert) {
+        alert.type?.let(::selectDisaster)
+        dismissAlert(alert.id)
+    }
+
+    /** Shows rescue requests known to the server that this car has not heard directly. */
+    private fun mergeServerIncidents(incidents: List<RemoteIncident>) = _state.update { s ->
+        val heardLocally = s.inbox.filter { it.kind != InboxKind.SERVER }.map { it.frame.originKey }.toSet()
+        val fromServer = incidents
+            .filter { it.frame.senderId != senderId && it.frame.originKey !in heardLocally }
+            .map { incident ->
+                val existing = s.inbox.firstOrNull { it.serverUid == incident.uid }
+                InboxItem(
+                    id = existing?.id ?: ++inboxId,
+                    frame = incident.frame,
+                    receivedAtMs = incident.lastHeardAtMs,
+                    snrDb = 0.0,
+                    correctedSymbols = 0,
+                    kind = InboxKind.SERVER,
+                    relayState = RelayState.NONE,
+                    serverUid = incident.uid,
+                    confirmations = incident.confirmations,
+                )
+            }
+        val local = s.inbox.filter { it.kind != InboxKind.SERVER }
+        s.copy(inbox = (local + fromServer).sortedByDescending { it.receivedAtMs }.take(MAX_INBOX))
+    }
+
     /** True while blackout is on only because the air-raid mode turned it on. */
     private var blackoutByMode = false
 
     init {
         uploader.start()
+        onlineSync.start()
+        scope.launch {
+            onlineSync.state.collect { online ->
+                _state.update { it.copy(online = online) }
+                mergeServerIncidents(online.incidents)
+            }
+        }
         scope.launch { uploader.status.collect { st -> _state.update { it.copy(gateway = st) } } }
         scope.launch { announcer.available.collect { ok -> _state.update { it.copy(voiceAvailable = ok) } } }
         val savedDisaster = prefs.getString(KEY_DISASTER, null)

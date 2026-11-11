@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://*.tile.openstreetmap.org https://unpkg.com; connect-src 'self'">
+<meta name="referrer" content="no-referrer">
+<title>구조 상황판</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<style>
+  :root {
+    --page: #f7f8fa; --canvas: #fff; --surface: #f1f3f5; --line: #e3e6eb;
+    --ink: #17191e; --body: #474c55; --mute: #8b919c;
+    --accent: #2b5ce6; --urgent: #e5484d; --urgent-soft: #fdecec; --help: #e8890c; --safe: #2f9a6a;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font-family: 'Pretendard Variable', Pretendard, -apple-system, 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; color: var(--ink); background: var(--page); display: grid; grid-template-rows: auto 1fr; }
+  header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: var(--canvas); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 18px; margin: 0; }
+  header .state { color: var(--mute); font-size: 14px; margin-left: auto; }
+  main { display: grid; grid-template-columns: 380px 1fr; min-height: 0; }
+  #list { overflow-y: auto; border-right: 1px solid var(--line); background: var(--canvas); }
+  #map { min-height: 0; }
+  .summary { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid var(--line); }
+  .summary div { padding: 14px 16px; }
+  .summary b { display: block; font-size: 24px; }
+  .summary span { font-size: 13px; color: var(--mute); }
+  .item { padding: 14px 16px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .item:hover { background: var(--surface); }
+  .item.urgent { background: var(--urgent-soft); }
+  .item .title { font-weight: 700; font-size: 16px; display: flex; gap: 8px; align-items: baseline; }
+  .item .title time { margin-left: auto; font-weight: 400; font-size: 13px; color: var(--mute); }
+  .item .meta { font-size: 13px; color: var(--body); margin-top: 4px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; align-self: center; }
+  .empty { padding: 40px 16px; color: var(--mute); text-align: center; }
+  form { display: flex; gap: 8px; }
+  input { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; width: 240px; }
+  button { font: inherit; font-weight: 600; padding: 8px 14px; border: 0; border-radius: 8px; background: var(--ink); color: #fff; cursor: pointer; }
+  .pin { width: 18px; height: 18px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.35); }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; grid-template-rows: 45% 55%; } #list { border-right: 0; border-bottom: 1px solid var(--line); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>구조 상황판</h1>
+  <form id="auth">
+    <input id="token" type="password" placeholder="상황판 토큰" autocomplete="off" aria-label="상황판 토큰">
+    <button>연결</button>
+  </form>
+  <span class="state" id="state">토큰을 입력하면 구조 요청을 불러옵니다</span>
+</header>
+<main>
+  <section id="list">
+    <div class="summary">
+      <div><b id="n-all">–</b><span>전체</span></div>
+      <div><b id="n-urgent" style="color:var(--urgent)">–</b><span>위급</span></div>
+      <div><b id="n-located">–</b><span>위치 있음</span></div>
+    </div>
+    <div id="items"><div class="empty">표시할 구조 요청이 없습니다</div></div>
+  </section>
+  <div id="map"></div>
+</main>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+const LABEL = {
+  SOS: ['긴급 구조 요청', 'urgent'], MEDICAL: ['응급 환자', 'urgent'], TRAPPED: ['고립됨', 'urgent'], FIRE: ['화재·연기', 'urgent'],
+  FLOOD: ['침수', 'urgent'], HAZARD: ['가스·위험물', 'urgent'], COLD: ['추위·저체온', 'urgent'], COLLAPSE: ['붕괴·낙석', 'urgent'],
+  CBRN: ['화생방·방사능', 'urgent'], VULNERABLE: ['노약자·어린이', 'help'], WATER: ['식수 필요', 'help'], FOOD: ['식량 필요', 'help'],
+  MEDICINE: ['약 필요', 'help'], POWER: ['연료·전력 부족', 'help'], ROAD_BLOCKED: ['앞길 막힘', 'help'],
+  ROUTE_CLEAR: ['지나갈 수 있음', 'safe'], SHELTER: ['대피소 있음', 'safe'], RESCUE_TEAM: ['구조대 접근', 'safe'], ALL_SAFE: ['모두 안전', 'safe'],
+};
+const NO_PEOPLE = new Set(['ROAD_BLOCKED', 'ROUTE_CLEAR', 'SHELTER', 'RESCUE_TEAM']);
+const COLOR = { urgent: '#e5484d', help: '#e8890c', safe: '#2f9a6a' };
+
+const map = L.map('map').setView([36.4, 127.9], 7);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+const layer = L.layerGroup().addTo(map);
+let token = sessionStorage.getItem('token') || '';
+let fitted = false;
+let timer;
+
+const $ = (id) => document.getElementById(id);
+const ago = (ms) => { const m = Math.round((Date.now() - ms) / 60000); return m < 1 ? '방금' : m < 60 ? m + '분 전' : Math.round(m / 60) + '시간 전'; };
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+
+function render(incidents) {
+  $('n-all').textContent = incidents.length;
+  $('n-urgent').textContent = incidents.filter((i) => (LABEL[i.message] || [])[1] === 'urgent').length;
+  $('n-located').textContent = incidents.filter((i) => i.lat !== null).length;
+  const items = $('items');
+  items.replaceChildren();
+  layer.clearLayers();
+  if (!incidents.length) items.append(el('div', 'empty', '표시할 구조 요청이 없습니다'));
+  const points = [];
+  for (const i of incidents) {
+    const [label, tone] = LABEL[i.message] || [i.message, 'help'];
+    const people = NO_PEOPLE.has(i.message) || i.people === 0 ? '' : i.people >= 15 ? ' · 15명 이상' : ' · ' + i.people + '명';
+    const row = el('div', 'item' + (tone === 'urgent' ? ' urgent' : ''));
+    const title = el('div', 'title');
+    const dot = el('span', 'dot'); dot.style.background = COLOR[tone];
+    title.append(dot, el('span', '', label + people), el('time', '', ago(i.lastHeardAt)));
+    const meta = el('div', 'meta', [
+      i.lat === null ? '위치 없음' : i.lat.toFixed(4) + ', ' + i.lon.toFixed(4),
+      '차량 ' + i.confirmations + '대가 전달',
+      i.fromSender ? '보낸 차량이 직접 전송' : i.hop === 0 ? '직접 들은 차량이 전송' : i.hop + '대 거쳐 전달',
+    ].join(' · '));
+    row.append(title, meta);
+    items.append(row);
+    if (i.lat !== null) {
+      const icon = L.divIcon({ className: '', html: '<div class="pin" style="background:' + COLOR[tone] + '"></div>', iconSize: [18, 18], iconAnchor: [9, 9] });
+      const marker = L.marker([i.lat, i.lon], { icon }).addTo(layer);
+      marker.bindPopup(el('b', '', label + people));
+      row.onclick = () => { map.setView([i.lat, i.lon], 15); marker.openPopup(); };
+      points.push([i.lat, i.lon]);
+    }
+  }
+  if (points.length && !fitted) { map.fitBounds(points, { maxZoom: 14, padding: [40, 40] }); fitted = true; }
+}
+
+async function load() {
+  if (!token) return;
+  try {
+    const res = await fetch('/api/incidents', { headers: { Authorization: 'Bearer ' + token }, cache: 'no-store' });
+    if (res.status === 401) { $('state').textContent = '토큰이 맞지 않습니다'; return; }
+    if (res.status === 503) { $('state').textContent = '서버에 상황판 토큰이 설정되지 않았습니다'; return; }
+    if (!res.ok) throw new Error(String(res.status));
+    render((await res.json()).incidents);
+    $('state').textContent = '10초마다 새로 고침 · 마지막 ' + new Date().toLocaleTimeString('ko-KR');
+  } catch { $('state').textContent = '서버에 연결하지 못했습니다'; }
+}
+
+$('auth').onsubmit = (e) => {
+  e.preventDefault();
+  token = $('token').value.trim();
+  sessionStorage.setItem('token', token);
+  $('token').value = '';
+  fitted = false;
+  clearInterval(timer);
+  load();
+  timer = setInterval(load, 10000);
+};
+if (token) { load(); timer = setInterval(load, 10000); }
+</script>
+</body>
+</html>

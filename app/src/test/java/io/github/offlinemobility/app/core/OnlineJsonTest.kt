@@ -1,0 +1,67 @@
+package io.github.offlinemobility.app.core
+
+import io.github.offlinemobility.app.core.disaster.DisasterType
+import io.github.offlinemobility.app.core.online.OnlineJson
+import io.github.offlinemobility.app.core.online.ShelterFinder
+import io.github.offlinemobility.app.core.protocol.RescueMessage
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class OnlineJsonTest {
+    @Test
+    fun alertsParseAndUnknownTypeIsNull() {
+        val result = OnlineJson.alerts(
+            """{"source":"live","alerts":[
+              {"id":"1","createdAt":1794000000000,"text":"대설경보 발효","level":"긴급재난","type":"SNOW_COLD"},
+              {"id":"2","createdAt":1794000000001,"text":"실종자를 찾습니다","type":null},
+              {"id":"3","createdAt":1794000000002,"text":"x","type":"NOT_A_TYPE"},
+              {"id":"","createdAt":1,"text":"no id"}, {"id":"5","text":"no time"}, "garbage"
+            ]}""",
+        )!!
+        assertEquals("live", result.source)
+        assertEquals(listOf(DisasterType.SNOW_COLD, null, null), result.items.map { it.type })
+    }
+
+    @Test
+    fun sheltersSkipInvalidCoordinatesAndSortByDistance() {
+        val result = OnlineJson.shelters(
+            """{"source":"sample","shelters":[
+              {"id":"far","name":"먼 곳","kind":"민방위 대피소","lat":37.52,"lon":127.05,"address":"a","capacity":100},
+              {"id":"near","name":"가까운 곳","kind":"지진 옥외대피장소","lat":37.4985,"lon":127.028,"address":"b"},
+              {"id":"bad","name":"잘못된 좌표","lat":137.0,"lon":127.0},
+              {"id":"noname","lat":37.0,"lon":127.0}
+            ]}""",
+        )!!
+        assertEquals(listOf("far", "near"), result.items.map { it.id })
+        val nearest = ShelterFinder.nearest(result.items, 37.4979, 127.0276, 5)
+        assertEquals("near", nearest.first().first.id)
+        assertTrue(nearest.first().second.meters < 100)
+        assertNull(result.items.first { it.id == "near" }.capacity)
+    }
+
+    @Test
+    fun incidentsBecomeFramesAndBadEntriesAreSkipped() {
+        val result = OnlineJson.incidents(
+            """{"incidents":[
+              {"uid":"u1","id":"a1-3","message":"MEDICAL","people":2,"hop":1,"lat":37.499,"lon":127.03,"lastHeardAt":1794000000000,"confirmations":2},
+              {"uid":"u2","id":"zz-3","message":"MEDICAL","people":2,"hop":1,"lastHeardAt":1},
+              {"uid":"u3","id":"a1-3","message":"ACK","people":0,"hop":0,"lastHeardAt":1},
+              {"uid":"u4","id":"b2-f","message":"WATER","people":99,"hop":0,"lastHeardAt":1},
+              {"uid":"u5","id":"c3-0","message":"WATER","people":0,"hop":0,"lastHeardAt":5}
+            ]}""",
+        )!!
+        assertEquals(listOf("u1", "u5"), result.map { it.uid })
+        val first = result.first().frame
+        assertEquals(listOf(0xA1, 3, 2, 1), listOf(first.senderId, first.sequence, first.people, first.hop))
+        assertEquals(RescueMessage.MEDICAL, first.message)
+        assertTrue(first.location != null && result.last().frame.location == null)
+    }
+
+    @Test
+    fun malformedJsonReturnsNull() {
+        assertNull(OnlineJson.alerts("<html>502</html>"))
+        assertNull(OnlineJson.incidents(""))
+    }
+}

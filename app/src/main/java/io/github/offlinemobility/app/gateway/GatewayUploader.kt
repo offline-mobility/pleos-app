@@ -16,10 +16,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.net.HttpURLConnection
-import java.net.URL
+import io.github.offlinemobility.app.net.ServerClient
 import java.util.UUID
-import javax.net.ssl.HttpsURLConnection
 
 data class GatewayStatus(
     val enabled: Boolean,
@@ -33,16 +31,15 @@ data class GatewayStatus(
  * When any validated internet connection appears (cellular comes back, Wi-Fi, satellite), sends the
  * stored rescue messages to the rescue server.
  *
- * - HTTPS only; the endpoint must start with https:// (cleartext is also blocked by the network
- *   security config).
+ * - HTTPS only (see [ServerClient]).
  * - No secret is embedded in the app. The server identifies submissions by a random per-install
  *   reporter id and must validate and rate-limit them (docs/GATEWAY_API.md).
- * - Disabled while [endpoint] is blank.
+ * - Disabled while no server is configured.
  */
 class GatewayUploader(
     context: Context,
     private val outbox: RescueOutbox,
-    private val endpoint: String,
+    private val client: ServerClient,
     private val scope: CoroutineScope,
 ) {
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
@@ -50,7 +47,7 @@ class GatewayUploader(
     private val reporterId: String = prefs.getString(KEY_REPORTER, null)
         ?: UUID.randomUUID().toString().also { prefs.edit().putString(KEY_REPORTER, it).apply() }
 
-    private val enabled = endpoint.startsWith("https://")
+    private val enabled = client.enabled
     private val _status = MutableStateFlow(GatewayStatus(enabled = enabled, pending = outbox.pending().size))
     val status: StateFlow<GatewayStatus> = _status.asStateFlow()
 
@@ -89,7 +86,7 @@ class GatewayUploader(
             while (_status.value.online) {
                 val batch = outbox.pending().take(BATCH)
                 if (batch.isEmpty()) break
-                val ok = withContext(Dispatchers.IO) { post(UploadJson.body(reporterId, batch)) }
+                val ok = withContext(Dispatchers.IO) { client.postJson("/api/reports", UploadJson.body(reporterId, batch)) }
                 debugLog { "gateway upload ${batch.size} → $ok" }
                 if (ok) {
                     val keys = batch.map { it.key }.toSet()
@@ -107,22 +104,6 @@ class GatewayUploader(
             }
         }
     }
-
-    private fun post(body: String): Boolean = runCatching {
-        val connection = URL(endpoint).openConnection() as HttpsURLConnection
-        try {
-            connection.requestMethod = "POST"
-            connection.connectTimeout = 10_000
-            connection.readTimeout = 15_000
-            connection.doOutput = true
-            connection.instanceFollowRedirects = false
-            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-            connection.responseCode in 200..299 || connection.responseCode == HttpURLConnection.HTTP_CONFLICT
-        } finally {
-            connection.disconnect()
-        }
-    }.getOrDefault(false)
 
     private companion object {
         const val KEY_REPORTER = "reporter_id"

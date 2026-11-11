@@ -34,6 +34,8 @@ import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Highlight
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
@@ -71,6 +73,8 @@ import io.github.offlinemobility.app.core.disaster.DisasterType
 import io.github.offlinemobility.app.core.disaster.WindowAdvice
 import io.github.offlinemobility.app.core.energy.Endurance
 import io.github.offlinemobility.app.core.light.Lamp
+import io.github.offlinemobility.app.core.online.OfficialAlert
+import io.github.offlinemobility.app.core.online.ShelterFinder
 import io.github.offlinemobility.app.core.light.LampGroup
 import io.github.offlinemobility.app.core.light.LightPattern
 import io.github.offlinemobility.app.core.light.LightPatterns
@@ -97,13 +101,15 @@ class ScreenActions(
     val toggleShareLocation: () -> Unit,
     val selectDisaster: (DisasterType) -> Unit,
     val toggleAudibleSos: () -> Unit,
+    val dismissAlert: (String) -> Unit,
+    val acceptAlert: (OfficialAlert) -> Unit,
     val toggleVoice: () -> Unit,
     val simulateIncoming: () -> Unit,
     val setGear: (GearState) -> Unit,
     val retryVehicle: () -> Unit,
 )
 
-private enum class Overlay { NONE, CONFIRM, MORE, SETTINGS, DISASTER, GUIDE }
+private enum class Overlay { NONE, CONFIRM, MORE, SETTINGS, DISASTER, GUIDE, SHELTERS }
 
 @Composable
 fun MainScreen(state: UiState, actions: ScreenActions) {
@@ -126,7 +132,12 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
 
     Box(Modifier.fillMaxSize().background(c.page)) {
         Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 20.dp)) {
-            Header(state, onDisaster = { overlay = Overlay.DISASTER }, onSettings = { overlay = Overlay.SETTINGS })
+            Header(
+                state,
+                onShelters = { overlay = Overlay.SHELTERS },
+                onDisaster = { overlay = Overlay.DISASTER },
+                onSettings = { overlay = Overlay.SETTINGS },
+            )
             Spacer(Modifier.height(Size.gap))
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 if (maxWidth > maxHeight) {
@@ -167,6 +178,7 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
                 onClose = { overlay = Overlay.NONE },
             )
             Overlay.GUIDE -> GuideSheet(state.guide, onClose = { overlay = Overlay.NONE })
+            Overlay.SHELTERS -> ShelterSheet(state, now, onClose = { overlay = Overlay.NONE })
             Overlay.SETTINGS -> SettingsSheet(state, actions, onClose = { overlay = Overlay.NONE })
             Overlay.NONE -> Unit
         }
@@ -176,7 +188,7 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
 // ---------------------------------------------------------------- header
 
 @Composable
-private fun Header(state: UiState, onDisaster: () -> Unit, onSettings: () -> Unit) {
+private fun Header(state: UiState, onShelters: () -> Unit, onDisaster: () -> Unit, onSettings: () -> Unit) {
     val c = LocalAppColors.current
     val (dot, text) = when {
         state.vehicleMode == VehicleMode.CONNECTING -> c.mute to "차량에 연결하는 중"
@@ -204,8 +216,16 @@ private fun Header(state: UiState, onDisaster: () -> Unit, onSettings: () -> Uni
             Tag("연습 모드", c.body, c.surface)
         }
         Spacer(Modifier.weight(1f))
+        if (state.gateway.enabled) {
+            if (state.gateway.online) Tag("통신 연결됨", c.safe, c.safeSoft) else Tag("통신 끊김 · 소리와 빛으로", c.help, c.helpSoft)
+            Spacer(Modifier.width(12.dp))
+        }
         if (state.blackout) {
             Tag("등화관제 중", c.help, c.helpSoft)
+            Spacer(Modifier.width(12.dp))
+        }
+        if (state.online.shelters.isNotEmpty()) {
+            AppButton("대피소", onShelters, Kind.SECONDARY, height = Size.secondaryButton, icon = Icons.Filled.Home)
             Spacer(Modifier.width(12.dp))
         }
         AppButton(
@@ -244,6 +264,18 @@ private fun SendArea(
                     text = "내 신호를 다른 차량이 이어서 전달했어요 · ${relativeTime(echo.receivedAtMs, now)}",
                     color = LocalAppColors.current.safe,
                     background = LocalAppColors.current.safeSoft,
+                )
+                Spacer(Modifier.height(Size.gap))
+            }
+            state.topAlert?.let { alert ->
+                AlertBanner(
+                    alert,
+                    state.disaster,
+                    onAccept = {
+                        actions.acceptAlert(alert)
+                        onGuide()
+                    },
+                    onDismiss = { actions.dismissAlert(alert.id) },
                 )
                 Spacer(Modifier.height(Size.gap))
             }
@@ -432,6 +464,14 @@ private fun SendingPanel(state: UiState, actions: ScreenActions) {
         }
 
         Spacer(Modifier.weight(1f))
+        val sentToServer = tx.lastFrame?.let { "%02x-%x".format(it.senderId, it.sequence) in state.gateway.lastUploadedKeys } == true
+        if (sentToServer) {
+            Spacer(Modifier.height(12.dp))
+            ProgressRow(Icons.Filled.CheckCircle, "구조 서버에도 보냈어요", done = true, active = false)
+        } else if (state.gateway.enabled && !state.gateway.online && message != RescueMessage.ACK) {
+            Spacer(Modifier.height(12.dp))
+            Text("통신이 끊겨 있어요 · 통신이 돌아오면 구조 서버로 자동으로 보내요", fontSize = Type.meta, color = c.mute)
+        }
         if (tx.finished) {
             Text("근처 차량이 받으면 오른쪽 목록에 표시돼요", fontSize = Type.body, color = c.body)
             Spacer(Modifier.height(Size.gap))
@@ -511,7 +551,7 @@ private fun methodText(state: UiState, message: RescueMessage): String {
 @Composable
 private fun InboxArea(state: UiState, actions: ScreenActions, now: Long, modifier: Modifier) {
     val c = LocalAppColors.current
-    val items = state.inbox.filter { it.kind == InboxKind.NEW }
+    val items = state.inbox.filter { it.kind == InboxKind.NEW || it.kind == InboxKind.SERVER }
     Column(
         modifier.clip(RoundedCornerShape(Size.radius)).background(c.surface).padding(20.dp),
     ) {
@@ -601,7 +641,10 @@ private fun InboxCard(item: InboxItem, now: Long, myFix: Fix?, canReply: Boolean
                     color = c.ink,
                 )
                 Text(
-                    listOfNotNull(routeText(item.frame.hop), whereText(item.frame, myFix)).joinToString(" · "),
+                    listOfNotNull(
+                        if (item.kind == InboxKind.SERVER) "구조 서버에서 받음 · 차량 ${item.confirmations}대 확인" else routeText(item.frame.hop),
+                        whereText(item.frame, myFix),
+                    ).joinToString(" · "),
                     fontSize = Type.body,
                     color = c.body,
                 )
@@ -613,7 +656,7 @@ private fun InboxCard(item: InboxItem, now: Long, myFix: Fix?, canReply: Boolean
             }
             Text(relativeTime(item.receivedAtMs, now), fontSize = Type.meta, color = c.mute)
         }
-        if (item.frame.message != RescueMessage.ACK) {
+        if (item.frame.message != RescueMessage.ACK && item.kind != InboxKind.SERVER) {
             Spacer(Modifier.height(14.dp))
             if (item.acknowledged) {
                 Row(Modifier.padding(start = 76.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1110,5 +1153,93 @@ private fun GuideLine(mark: String, text: String, markColor: Color, foreign: Boo
             color = c.ink,
             modifier = Modifier.padding(top = 4.dp),
         )
+    }
+}
+
+// ---------------------------------------------------------------- online
+
+@Composable
+private fun AlertBanner(alert: OfficialAlert, current: DisasterType, onAccept: () -> Unit, onDismiss: () -> Unit) {
+    val c = LocalAppColors.current
+    val suggest = alert.type?.takeIf { it != current }
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(Size.radius)).background(c.urgentSoft)
+            .border(1.dp, c.urgent.copy(alpha = 0.35f), RoundedCornerShape(Size.radius)).padding(20.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Campaign, contentDescription = null, tint = c.urgent, modifier = Modifier.size(36.dp))
+            Spacer(Modifier.width(12.dp))
+            Text("재난문자", fontSize = Type.body, fontWeight = FontWeight.Bold, color = c.urgent)
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(alert.text, fontSize = Type.body, color = c.ink, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(14.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
+            AppButton("닫기", onDismiss, Kind.SECONDARY, Modifier.weight(1f), height = 64.dp)
+            if (suggest != null) {
+                AppButton("‘${suggest.label}’ 행동요령 보기", onAccept, Kind.TONE, Modifier.weight(2f), height = 64.dp, tone = Tone.URGENT)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShelterSheet(state: UiState, now: Long, onClose: () -> Unit) {
+    val c = LocalAppColors.current
+    val fix = state.myFix
+    SheetScrim(onClose) {
+        Sheet(width = 1000.dp) {
+            Text("가까운 대피소", fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink)
+            val fetched = state.online.sheltersFetchedAtMs
+            Text(
+                listOfNotNull(
+                    fetched?.let { "${relativeTime(it, now)}에 받아 둔 정보예요" },
+                    "통신이 끊겨도 볼 수 있어요",
+                    "견본 데이터".takeIf { state.online.sample },
+                ).joinToString(" · "),
+                fontSize = Type.meta,
+                color = c.mute,
+            )
+            Spacer(Modifier.height(16.dp))
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                if (fix == null) {
+                    Text("내 위치를 아직 몰라 거리 대신 목록만 보여 드려요", fontSize = Type.body, color = c.help)
+                    Spacer(Modifier.height(8.dp))
+                }
+                val rows = if (fix != null) ShelterFinder.nearest(state.online.shelters, fix.latitude, fix.longitude, 6)
+                else state.online.shelters.take(6).map { it to null }
+                rows.forEach { (shelter, offset) ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(60.dp).clip(CircleShape).background(c.safeSoft), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Filled.Home, contentDescription = null, tint = c.safe, modifier = Modifier.size(36.dp))
+                        }
+                        Spacer(Modifier.width(16.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(shelter.name, fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                listOfNotNull(shelter.kind.ifEmpty { null }, shelter.capacity?.let { "${it}명 수용" }, shelter.address.ifEmpty { null })
+                                    .joinToString(" · "),
+                                fontSize = Type.meta,
+                                color = c.body,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (offset != null) {
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                "${Geo.compassWord(offset.bearingDeg)} ${Geo.distanceWord(offset.meters)}",
+                                fontSize = Type.body,
+                                fontWeight = FontWeight.Bold,
+                                color = c.safe,
+                            )
+                        }
+                    }
+                    Divider()
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+            AppButton("닫기", onClose, Kind.SECONDARY, Modifier.fillMaxWidth())
+        }
     }
 }

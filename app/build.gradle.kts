@@ -19,9 +19,10 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // Rescue server for forwarding stored messages (docs/GATEWAY_API.md). Blank = forwarding off.
-        // Must be https://. Override per build with -PgatewayUrl=https://...
-        buildConfigField("String", "GATEWAY_URL", "\"${project.findProperty("gatewayUrl") ?: ""}\"")
+        // Rescue server base URL (docs/GATEWAY_API.md). Blank = online features off.
+        // Must be https:// (debug builds also accept http://10.0.2.2 for a local server).
+        // Set per build with -PserverUrl=https://...
+        buildConfigField("String", "SERVER_URL", "\"${project.findProperty("serverUrl") ?: ""}\"")
     }
 
     // Release signing key stays on the developer machine (keystore.properties and *.jks are git-ignored).
@@ -91,5 +92,6 @@ dependencies {
 
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)
+    testImplementation(libs.json)
 }
 

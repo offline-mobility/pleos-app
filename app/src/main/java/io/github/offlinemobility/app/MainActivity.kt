@@ -59,6 +59,8 @@ class MainActivity : ComponentActivity() {
                         toggleShareLocation = engine::toggleShareLocation,
                         selectDisaster = engine::selectDisaster,
                         toggleAudibleSos = engine::toggleAudibleSos,
+                        dismissAlert = engine::dismissAlert,
+                        acceptAlert = engine::acceptAlert,
                         toggleVoice = engine::toggleVoiceAnnounce,
                         simulateIncoming = engine::simulateIncoming,
                         setGear = engine::setSimulatedGear,

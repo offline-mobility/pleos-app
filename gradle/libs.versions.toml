@@ -24,6 +24,7 @@ androidx-compose-material-icons-extended = { group = "androidx.compose.material"
 vehicle-sdk = { module = "ai.pleos.playground:Vehicle", version.ref = "vehicleSdk" }
 tts-sdk = { module = "ai.pleos.playground:TextToSpeech", version.ref = "ttsSdk" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+json = { module = "org.json:json", version = "20240303" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
