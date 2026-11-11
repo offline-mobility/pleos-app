@@ -58,6 +58,8 @@ class MainActivity : ComponentActivity() {
                         toggleRelay = engine::toggleAutoRelay,
                         toggleShareLocation = engine::toggleShareLocation,
                         selectDisaster = engine::selectDisaster,
+                        toggleAudibleSos = engine::toggleAudibleSos,
+                        toggleVoice = engine::toggleVoiceAnnounce,
                         simulateIncoming = engine::simulateIncoming,
                         setGear = engine::setSimulatedGear,
                         retryVehicle = engine::connectVehicle,

@@ -3,6 +3,10 @@ package io.github.offlinemobility.app
 import android.app.Application
 import io.github.offlinemobility.app.audio.AcousticReceiver
 import io.github.offlinemobility.app.audio.AcousticTransmitter
+import io.github.offlinemobility.app.audio.VoiceAnnouncer
+import io.github.offlinemobility.app.core.acoustic.AudibleSos
+import io.github.offlinemobility.app.core.protocol.Geo
+import io.github.offlinemobility.app.ui.copy
 import io.github.offlinemobility.app.core.acoustic.AcousticModem
 import io.github.offlinemobility.app.core.acoustic.DecodedSignal
 import io.github.offlinemobility.app.core.acoustic.ModemConfig
@@ -88,6 +92,7 @@ data class TxState(
     val people: Int = 0,
     val lastFrame: RescueFrame? = null,
     val lastResult: String? = null,
+    val sosBeeping: Boolean = false,
     /** Every planned channel has finished on its own (not stopped). */
     val finished: Boolean = false,
     val stopped: Boolean = false,
@@ -120,6 +125,11 @@ data class UiState(
     /** Attach the car's position to outgoing messages. */
     val shareLocation: Boolean = true,
     val disaster: DisasterType = DisasterType.GENERAL,
+    /** Plain Morse SOS beeps after critical data frames, for people without the app. */
+    val audibleSos: Boolean = true,
+    /** Read received messages aloud. */
+    val voiceAnnounce: Boolean = true,
+    val voiceAvailable: Boolean = false,
 ) {
     val guide: DisasterGuide get() = DisasterGuides.of(disaster)
 
@@ -153,6 +163,7 @@ class SignalEngine(application: Application) {
     private val transmitter = AcousticTransmitter(application)
     private val receiver = AcousticReceiver(application, config)
     private val locationTracker = LocationTracker(application)
+    private val announcer = VoiceAnnouncer(application, scope)
     private val prefs = application.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
     private val relayPolicy = RelayPolicy(ownSenderId = senderId)
 
@@ -168,6 +179,7 @@ class SignalEngine(application: Application) {
     private var blackoutByMode = false
 
     init {
+        scope.launch { announcer.available.collect { ok -> _state.update { it.copy(voiceAvailable = ok) } } }
         val savedDisaster = prefs.getString(KEY_DISASTER, null)
             ?.let { name -> DisasterType.entries.firstOrNull { it.name == name } }
         if (savedDisaster != null) {
@@ -231,6 +243,15 @@ class SignalEngine(application: Application) {
     fun toggleAutoRelay() = _state.update { it.copy(autoRelay = !it.autoRelay) }
 
     fun toggleShareLocation() = _state.update { it.copy(shareLocation = !it.shareLocation) }
+
+    fun toggleAudibleSos() = _state.update { it.copy(audibleSos = !it.audibleSos) }
+
+    fun toggleVoiceAnnounce() {
+        _state.update { it.copy(voiceAnnounce = !it.voiceAnnounce) }
+        if (!_state.value.voiceAnnounce) announcer.stop()
+    }
+
+
 
     /**
      * Switches the disaster mode. A mode that calls for blackout (air raid) turns it on, and leaving
@@ -393,6 +414,12 @@ class SignalEngine(application: Application) {
                 _state.update { it.copy(tx = it.tx.copy(soundProgress = (i + 1f) / repeats, soundDone = i + 1)) }
                 if (i < repeats - 1) delay(SOUND_GAP_MS)
             }
+            if (error == null && frame.message.critical && _state.value.audibleSos) {
+                delay(SOUND_GAP_MS)
+                _state.update { it.copy(tx = it.tx.copy(sosBeeping = true)) }
+                transmitter.play(AudibleSos.samples(config.sampleRate), config.sampleRate)
+                _state.update { it.copy(tx = it.tx.copy(sosBeeping = false)) }
+            }
             _state.update {
                 it.copy(
                     tx = it.tx.copy(
@@ -457,7 +484,18 @@ class SignalEngine(application: Application) {
                     },
                 )
                 if (willRelay) scheduleRelay(item.id, relay!!, decision.relayDelayMs)
+                announce(signal.frame)
             }
+        }
+    }
+
+    /** Speaks a new message once our own sound transmission (if any) has finished. */
+    private fun announce(frame: RescueFrame) {
+        if (!_state.value.voiceAnnounce || !_state.value.voiceAvailable) return
+        val text = spokenText(frame, locationTracker.current())
+        scope.launch {
+            while (_state.value.tx.soundActive) delay(300)
+            announcer.say(text)
         }
     }
 
@@ -550,3 +588,23 @@ class SignalEngine(application: Application) {
         const val MAX_INBOX = 30
     }
 }
+
+/** Sentence read aloud for a received frame, e.g. "가까운 차량에서 응급 환자 2명 신호를 받았어요. 북동쪽 약 300미터." */
+internal fun spokenText(frame: RescueFrame, myFix: io.github.offlinemobility.app.location.Fix?): String {
+    val title = frame.message.copy.title
+    val people = when {
+        frame.people == 0 || frame.message.name in NO_PEOPLE -> ""
+        frame.people >= 15 -> " 15명 이상"
+        else -> " ${frame.people}명"
+    }
+    val from = if (frame.hop == 0) "가까운 차량에서" else "차량 ${frame.hop}대를 거쳐"
+    val where = frame.location?.let { cell ->
+        if (myFix == null) return@let null
+        val offset = Geo.offset(myFix.latitude, myFix.longitude, cell.latitude, cell.longitude)
+        val distance = Geo.distanceWord(offset.meters).replace("km", "킬로미터").replace("m", "미터")
+        if (offset.meters < 50) "아주 가까이 있어요." else "${Geo.compassWord(offset.bearingDeg)} $distance."
+    }
+    return listOfNotNull("$from $title$people 신호를 받았어요.", where).joinToString(" ")
+}
+
+private val NO_PEOPLE = setOf("ROAD_BLOCKED", "ROUTE_CLEAR", "SHELTER", "RESCUE_TEAM", "ACK")

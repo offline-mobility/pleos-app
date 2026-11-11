@@ -95,6 +95,8 @@ class ScreenActions(
     val toggleRelay: () -> Unit,
     val toggleShareLocation: () -> Unit,
     val selectDisaster: (DisasterType) -> Unit,
+    val toggleAudibleSos: () -> Unit,
+    val toggleVoice: () -> Unit,
     val simulateIncoming: () -> Unit,
     val setGear: (GearState) -> Unit,
     val retryVehicle: () -> Unit,
@@ -368,6 +370,7 @@ private fun SendingPanel(state: UiState, actions: ScreenActions) {
         if (tx.soundTotal > 0) {
             val soundText = when {
                 tx.soundFailed -> "소리를 내지 못했어요"
+                tx.sosBeeping -> "사람이 알아듣는 SOS 소리를 내는 중"
                 tx.soundActive -> "소리로 알리는 중 (${(tx.soundDone + 1).coerceAtMost(tx.soundTotal)}/${tx.soundTotal})"
                 tx.soundDone >= tx.soundTotal -> "소리로 ${tx.soundTotal}번 알렸어요"
                 else -> "소리 알림을 멈췄어요"
@@ -747,6 +750,13 @@ private fun SettingsSheet(state: UiState, actions: ScreenActions, onClose: () ->
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
                 SectionTitle("보내는 방법")
                 SwitchRow("소리로 알리기", "차 스피커로 신호음을 보내요. 근처 차량이 이 소리를 받아 글자로 보여 줘요.", state.useSound, actions.toggleSound)
+                SwitchRow(
+                    "사람이 듣는 SOS 소리",
+                    "위급한 메시지는 신호음 뒤에 '삐삐삐 삐- 삐- 삐- 삐삐삐'를 내서 앱이 없는 사람도 알아듣게 해요.",
+                    state.audibleSos,
+                    actions.toggleAudibleSos,
+                    enabled = state.useSound,
+                )
                 SwitchRow("불빛으로 알리기", "전조등을 국제 조난 신호 방식으로 깜빡여요.", state.useLight, actions.toggleLight, enabled = !state.blackout)
                 if (state.useLight && !state.blackout) {
                     InfoRow("깜빡일 위치") {
@@ -773,6 +783,14 @@ private fun SettingsSheet(state: UiState, actions: ScreenActions, onClose: () ->
                 )
                 SectionTitle("받은 신호")
                 SwitchRow("다음 차량으로 이어서 전달", "받은 신호를 잠시 뒤 내 차에서도 다시 보내 더 멀리 퍼지게 해요.", state.autoRelay, actions.toggleRelay)
+                SwitchRow(
+                    "받은 신호 음성으로 알려 주기",
+                    if (state.voiceAvailable) "화면을 보지 않아도 '가까운 차량에서 응급 환자 2명 신호를 받았어요'처럼 읽어 줘요."
+                    else "이 기기에는 한국어 음성 엔진이 없어 쓸 수 없어요.",
+                    state.voiceAnnounce && state.voiceAvailable,
+                    actions.toggleVoice,
+                    enabled = state.voiceAvailable,
+                )
                 SectionTitle("시연")
                 Row(horizontalArrangement = Arrangement.spacedBy(Size.gap), modifier = Modifier.padding(vertical = 12.dp)) {
                     AppButton("다른 차 신호 받아 보기", actions.simulateIncoming, Kind.SECONDARY, Modifier.weight(1f))

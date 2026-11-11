@@ -45,6 +45,7 @@ android {
 
 dependencies {
     implementation(libs.vehicle.sdk)
+    implementation(libs.tts.sdk)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
