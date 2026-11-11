@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -22,13 +24,38 @@ android {
         buildConfigField("String", "GATEWAY_URL", "\"${project.findProperty("gatewayUrl") ?: ""}\"")
     }
 
+    // Release signing key stays on the developer machine (keystore.properties and *.jks are git-ignored).
+    val signingProps = rootProject.file("keystore.properties").takeIf { it.exists() }?.let { file ->
+        Properties().apply { file.inputStream().use(::load) }
+    }
+    signingConfigs {
+        if (signingProps != null) {
+            create("release") {
+                storeFile = rootProject.file("app").resolve(signingProps.getProperty("storeFile"))
+                storePassword = signingProps.getProperty("storePassword")
+                keyAlias = signingProps.getProperty("keyAlias")
+                keyPassword = signingProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
+        // Debug build with release shrinking, to reproduce R8-only problems with logs available.
+        create("minifiedDebug") {
+            initWith(getByName("debug"))
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            matchingFallbacks += listOf("debug")
+        }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            isDebuggable = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 

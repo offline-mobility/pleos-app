@@ -4,11 +4,15 @@
 
 ## 주요 기능
 
-- **음향 데이터 통신:** 15종 구조 메시지와 탑승 인원을 차량 스피커로 1.7초 프레임에 실어 보냅니다. 수신 차량은 마이크로 받아 문장으로 표시합니다.
+- **음향 데이터 통신:** 19종 구조 메시지, 탑승 인원, GPS 위치(약 40m)를 차량 스피커로 3.3초 프레임에 실어 보냅니다. 수신 차량은 마이크로 받아 "응급 환자 · 2명 · 북동쪽 약 300m"처럼 표시합니다.
 - **조난 점멸:** 차량이 지원하는 외부 조명을 골라 SOS(USCG 46 CFR 161.013-7 타이밍), 국제 산악 조난 신호(분당 6회), 응답 신호(분당 3회)를 보냅니다. 후방 안개등이 없는 차량은 하향등과 상향등을 함께 점멸합니다.
-- **차량 간 중계:** 최대 3홉까지 중계하고, 같은 메시지는 한 번만 보냅니다. 내 신호가 중계되면 확인 표시가 뜹니다.
-- **안전 잠금:** P단에서만 송신합니다. P단을 벗어나면 즉시 중단하고 조명을 원래대로 되돌립니다.
-- **등화관제 모드:** 외부 조명을 쓰지 않고 소리로만 통신합니다.
+- **차량 간 중계:** 최대 3홉까지 중계하고, 같은 메시지는 한 번만 보냅니다. 분당 6회로 제한해 가짜 신호가 증폭되지 않게 합니다.
+- **재난 유형 모드 13종:** 공식 국민행동요령 기반의 차 안 행동요령을 오프라인으로 보여 주고, 상황에 맞는 메시지와 앱 동작(공습 시 등화관제, 화학사고 시 창문 닫기 안내)을 바꿉니다.
+- **사람에게 직접 알리기:** 위급 메시지 뒤에 사람이 알아듣는 SOS 소리를 붙이고, 받은 신호를 음성으로 읽어 줍니다.
+- **차량 에너지:** 배터리·연료 잔량으로 신호 지속 시간을 추정하고, 부족하면 불빛을 끄도록 안내합니다.
+- **구조기관 전달:** 받은 구조 요청을 기기 안에 암호화해 두었다가, 통신이 돌아오면 구조 서버로 HTTPS 전송합니다.
+- **화면 밖 수신:** 포그라운드 서비스로 앱을 내려도 수신·중계를 계속합니다.
+- **안전 잠금:** P단에서만 송신하고, P단을 벗어나면 즉시 중단하고 조명을 원래대로 되돌립니다.
 
 ## 실행 방법
 
@@ -24,6 +28,9 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 ```bash
 export JAVA_HOME=$(/usr/libexec/java_home -v 17)
 ./gradlew testDebugUnitTest assembleDebug
+
+# release (R8 축소·서명). 서명 키는 저장소에 없으며 keystore.properties로 지정합니다.
+./gradlew assembleRelease -PgatewayUrl=https://구조서버주소   # 서버 주소를 비우면 구조 서버 전달이 꺼집니다
 ```
 
 ## 테스트 환경 및 필요한 설정
@@ -34,7 +41,7 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 17)
 | SDK | compileSdk 35, minSdk 28 |
 | 에뮬레이터 | Pleos Connect Emulator v2.1.0 (API 34, Cold boot, RAM 4GB). 설치 방법은 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
 | 차량 SDK | Pleos Vehicle SDK 2.3.2 (`ai.pleos.playground:Vehicle`) |
-| 권한 | `RECORD_AUDIO`(최초 실행 시 허용), `pleos.car.permission.CAR_LIGHTS`, `CONTROL_CAR_LIGHTS`, `CAR_DRIVE` |
+| 권한 | 최초 실행 시 마이크·위치·알림 허용. Pleos: `CAR_LIGHTS`, `CONTROL_CAR_LIGHTS`, `CAR_DRIVE`, `CAR_ENERGY`, `TTS_SERVICE` |
 
 **에뮬레이터에서 확인하는 방법**
 1. 에뮬레이터를 실행하고 `adb forward tcp:8088 tcp:8088` 후 `http://127.0.0.1:8088/`에서 Virtual Console을 엽니다.
@@ -59,11 +66,19 @@ app/src/main/java/.../
   core/relay/      중복 억제, 홉 제한, 무작위 백오프
   core/safety/     P단 송신 잠금
   vehicle/         Pleos Vehicle SDK 연동(Light, Gear), 조명 패턴 실행·복원
-  ui/              화면, 색·글자 기준, 메시지 문구
+  ui/              화면, 색·글자 기준, 메시지·재난 문구
+  core/disaster/   재난 유형 13종 행동요령과 앱 동작
+  core/energy/     배터리·연료 기반 지속 시간 추정
+  core/gateway/    구조 서버 전송 형식
+  gateway/         암호화 보관함, HTTPS 전송
+  location/        GPS
   audio/           AudioTrack 송신(오디오 포커스), AudioRecord 수신
 docs/
   PROPOSAL.md         기획서 초안
   UI_DESIGN.md        화면 설계
+  GATEWAY_API.md      구조 서버 API 명세
+  SECURITY.md         보안·개인정보 점검
+  WORKPLAN.md         작업 계획
   CONTEST_RESEARCH.md 공모전·Pleos 조사 자료
   DEVELOPMENT.md      개발 환경
 ```
