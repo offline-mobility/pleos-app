@@ -115,3 +115,10 @@ fun relativeTime(atMs: Long, nowMs: Long): String {
 }
 
 fun routeText(hop: Int): String = if (hop == 0) "가까운 차량" else "차량 ${hop}대를 거쳐 전달"
+
+/**
+ * Korean text wraps between any two syllables, which splits words across lines ("가까 / 이").
+ * A word joiner between the letters of each word leaves the spaces as the only places to break.
+ * For sentences only; a single word wider than its line would no longer wrap.
+ */
+fun String.keepWords(): String = split(' ').joinToString(" ") { word -> word.asIterable().joinToString("\u2060") }

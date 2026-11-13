@@ -121,7 +121,7 @@ internal fun KeepWarmSheet(state: UiState, actions: ScreenActions, onClose: () -
                 )
             }
             Spacer(Modifier.height(6.dp))
-            Text("구조를 기다리는 동안 차가 난방을 알아서 조절해 배터리를 오래 써요", fontSize = Type.body, color = c.body)
+            Text("구조를 기다리는 동안 차가 난방을 알아서 조절해 배터리를 오래 써요".keepWords(), fontSize = Type.body, color = c.body)
             Spacer(Modifier.height(16.dp))
 
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
@@ -147,7 +147,7 @@ internal fun KeepWarmSheet(state: UiState, actions: ScreenActions, onClose: () -
                     Divider()
                     if (warm.refused) {
                         Spacer(Modifier.height(10.dp))
-                        Text("이 차가 일부 난방 설정을 받아들이지 않았어요. 직접 조절해야 할 수 있어요.", fontSize = Type.meta, color = c.help)
+                        Text("이 차가 일부 난방 설정을 받아들이지 않았어요. 직접 조절해야 할 수 있어요.".keepWords(), fontSize = Type.meta, color = c.help)
                     }
                 } else {
                     Divider()
@@ -195,7 +195,7 @@ internal fun KeepWarmSheet(state: UiState, actions: ScreenActions, onClose: () -
                 GuideLine("3", "기어를 P에서 바꾸거나 ‘그만하기’를 누르면 원래 난방으로 돌아가요", c.ink, false)
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "시간은 바깥 영하 ${(-CabinAssumptions().outsideC).toInt()}도를 기준으로 짧게 잡은 추정이에요. 이동할 때 쓸 전력은 남겨 두고 계산했어요.",
+                    "시간은 바깥 영하 ${(-CabinAssumptions().outsideC).toInt()}도를 기준으로 짧게 잡은 추정이에요. 이동할 때 쓸 전력은 남겨 두고 계산했어요.".keepWords(),
                     fontSize = Type.meta,
                     color = c.mute,
                 )

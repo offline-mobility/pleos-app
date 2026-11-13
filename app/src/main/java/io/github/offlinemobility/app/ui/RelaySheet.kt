@@ -45,7 +45,7 @@ internal fun RelaySheet(tx: TxState, onClose: () -> Unit) {
                 Spacer(Modifier.width(32.dp))
                 Column(Modifier.weight(1f)) {
                     Text("휴대폰으로 전달", fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink)
-                    Text("이 앱이 없는 사람도 구조 요청을 대신 전해 줄 수 있어요", fontSize = Type.body, color = c.body)
+                    Text("이 앱이 없는 사람도 구조 요청을 대신 전해 줄 수 있어요".keepWords(), fontSize = Type.body, color = c.body)
                     Spacer(Modifier.height(12.dp))
                     GuideLine("1", "휴대폰 카메라로 왼쪽 그림을 찍어요", c.ink, false)
                     GuideLine("2", "인터넷이 되는 곳에서 그 주소를 열어요", c.ink, false)

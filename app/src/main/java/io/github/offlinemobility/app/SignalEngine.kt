@@ -268,8 +268,9 @@ class SignalEngine(application: Application) {
     /** Shows rescue requests known to the server that this car has not heard directly. */
     private fun mergeServerIncidents(incidents: List<RemoteIncident>) = _state.update { s ->
         val heardLocally = s.inbox.filter { it.kind != InboxKind.SERVER }.map { it.frame.originKey }.toSet()
+        val mine = ownSentKeys()
         val fromServer = incidents
-            .filter { it.frame.senderId != senderId && it.frame.originKey !in heardLocally }
+            .filter { it.frame.senderId != senderId && it.frame.originKey !in heardLocally && it.frame.originKey !in mine }
             .map { incident ->
                 val existing = s.inbox.firstOrNull { it.serverUid == incident.uid }
                 InboxItem(
@@ -286,6 +287,26 @@ class SignalEngine(application: Application) {
             }
         val local = s.inbox.filter { it.kind != InboxKind.SERVER }
         s.copy(inbox = (local + fromServer).sortedByDescending { it.receivedAtMs }.take(MAX_INBOX))
+    }
+
+    /**
+     * Messages this car sent in earlier sessions. The sender id changes every time the app starts,
+     * so without this list the car's own requests would come back from the server looking like
+     * someone else's. Kept as "originKey:sentAtMs" for as long as the server keeps a request.
+     */
+    private fun ownSentKeys(): Set<Int> {
+        val cutoff = System.currentTimeMillis() - OWN_SENT_KEEP_MS
+        return prefs.getStringSet(KEY_OWN_SENT, emptySet()).orEmpty().mapNotNull { entry ->
+            val (key, at) = entry.split(':').takeIf { it.size == 2 } ?: return@mapNotNull null
+            key.toIntOrNull()?.takeIf { (at.toLongOrNull() ?: 0L) >= cutoff }
+        }.toSet()
+    }
+
+    private fun rememberOwnSent(frame: RescueFrame) {
+        val now = System.currentTimeMillis()
+        val kept = prefs.getStringSet(KEY_OWN_SENT, emptySet()).orEmpty()
+            .filter { (it.substringAfter(':').toLongOrNull() ?: 0L) >= now - OWN_SENT_KEEP_MS }
+        prefs.edit().putStringSet(KEY_OWN_SENT, (kept + "${frame.originKey}:$now").toSet()).apply()
     }
 
     /** True while blackout is on only because the air-raid mode turned it on. */
@@ -517,6 +538,7 @@ class SignalEngine(application: Application) {
         val frame = RescueFrame(s.selected, if (withPeople) s.people else 0, senderId, sequence, location = outgoingLocation())
         debugLog { "transmit $frame sound=${s.useSound} light=${s.lightUsable} plan=${s.lightPlan}" }
         relayPolicy.markSent(frame, System.currentTimeMillis())
+        rememberOwnSent(frame)
         queueForRescue(frame, own = true)
         startTx(frame, s.lightPattern, soundRepeats = if (s.useSound) SOUND_REPEATS else 0)
     }
@@ -775,6 +797,8 @@ class SignalEngine(application: Application) {
 
     private companion object {
         const val KEY_DISASTER = "disaster"
+        const val KEY_OWN_SENT = "own_sent"
+        const val OWN_SENT_KEEP_MS = 72 * 3_600_000L
         const val ENERGY_POLL_MS = 60_000L
         const val SOUND_REPEATS = 3
         const val SOUND_GAP_MS = 400L

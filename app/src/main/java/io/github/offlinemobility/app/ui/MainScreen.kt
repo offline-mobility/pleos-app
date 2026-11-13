@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VolumeUp
@@ -59,7 +60,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -203,36 +208,20 @@ private fun Header(state: UiState, onShelters: () -> Unit, onDisaster: () -> Uni
         state.gear == GearState.UNKNOWN -> c.help to "차 상태를 확인하고 있어요"
         else -> c.help to "주행 중 · 차를 세우고 P단에서 보낼 수 있어요"
     }
-    Row(Modifier.fillMaxWidth().heightIn(min = 72.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(18.dp).clip(CircleShape).background(dot))
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f, fill = false)) {
-            Text(text, fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            state.endurance?.let { e ->
-                val warmHours = state.keepWarmEstimate?.takeIf { state.keepWarm.active }?.hours(state.keepWarm.level)
-                Text(
-                    if (warmHours != null) "배터리 ${e.percent}% · 난방을 아끼는 중 · ${warmHoursWord(warmHours)} 버틸 수 있어요 (추정)"
-                    else "${if (e.isEv) "배터리" else "연료"} ${e.percent}% · 지금처럼 쓰면 ${Endurance.hoursWord(e.hours)} 버틸 수 있어요 (추정, 냉난방 제외)",
-                    fontSize = Type.meta,
-                    color = if (e.low) c.help else c.mute,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+    Row(Modifier.fillMaxWidth().heightIn(min = Size.secondaryButton), verticalAlignment = Alignment.CenterVertically) {
+        // Left: everything about the current state. Right: only things to press, all the same size.
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(18.dp).clip(CircleShape).background(dot))
+                Spacer(Modifier.width(14.dp))
+                Text(text, fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            val status = statusLine(state, c)
+            if (status.isNotEmpty()) {
+                Text(status, fontSize = Type.meta, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 32.dp))
             }
         }
-        if (state.vehicleMode == VehicleMode.SIMULATION) {
-            Spacer(Modifier.width(14.dp))
-            Tag("연습 모드", c.body, c.surface)
-        }
-        Spacer(Modifier.weight(1f))
-        if (state.gateway.enabled) {
-            if (state.gateway.online) Tag("통신 연결됨", c.safe, c.safeSoft) else Tag("통신 끊김 · 소리와 빛으로", c.help, c.helpSoft)
-            Spacer(Modifier.width(12.dp))
-        }
-        if (state.blackout) {
-            Tag("등화관제 중", c.help, c.helpSoft)
-            Spacer(Modifier.width(12.dp))
-        }
+        Spacer(Modifier.width(16.dp))
         if (state.online.shelters.isNotEmpty()) {
             AppButton("대피소", onShelters, Kind.SECONDARY, height = Size.secondaryButton, icon = Icons.Filled.Home)
             Spacer(Modifier.width(12.dp))
@@ -246,6 +235,29 @@ private fun Header(state: UiState, onShelters: () -> Unit, onDisaster: () -> Uni
         )
         Spacer(Modifier.width(12.dp))
         AppButton("설정", onSettings, Kind.SECONDARY, height = Size.secondaryButton, icon = Icons.Filled.Settings)
+    }
+}
+
+/** Connection, blackout and energy in one line under the headline; colour only where it means something. */
+private fun statusLine(state: UiState, c: AppColors): AnnotatedString = buildAnnotatedString {
+    fun item(text: String, color: Color, strong: Boolean = true) {
+        if (length > 0) withStyle(SpanStyle(color = c.mute)) { append("  ·  ") }
+        withStyle(SpanStyle(color = color, fontWeight = if (strong) FontWeight.SemiBold else FontWeight.Normal)) { append(text) }
+    }
+    if (state.vehicleMode == VehicleMode.SIMULATION) item("연습 모드", c.body)
+    if (state.gateway.enabled) {
+        if (state.gateway.online) item("통신 연결됨", c.safe) else item("통신 끊김 · 소리와 빛으로 보내요", c.help)
+    }
+    if (state.blackout) item("등화관제 중", c.help)
+    state.endurance?.let { e ->
+        val warmHours = state.keepWarmEstimate?.takeIf { state.keepWarm.active }?.hours(state.keepWarm.level)
+        val source = if (e.isEv) "배터리" else "연료"
+        item(
+            if (warmHours != null) "$source ${e.percent}% · 난방 아끼는 중 · ${warmHoursWord(warmHours)} (추정)"
+            else "$source ${e.percent}% · 냉난방 없이 ${Endurance.hoursWord(e.hours)} (추정)",
+            if (e.low) c.help else c.mute,
+            strong = e.low,
+        )
     }
 }
 
@@ -649,57 +661,67 @@ private fun InboxCard(item: InboxItem, now: Long, myFix: Fix?, canReply: Boolean
     val c = LocalAppColors.current
     val copy = item.frame.message.copy
     val urgent = copy.tone == Tone.URGENT
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(Size.radius))
+    val fromServer = item.kind == InboxKind.SERVER
+    val shape = RoundedCornerShape(Size.radius)
+    // Reading order for someone deciding whether to go and help: what and how many, where, then how it got here.
+    Row(
+        Modifier.fillMaxWidth().clip(shape)
             .background(if (urgent) c.urgentSoft else c.canvas)
-            .border(1.dp, if (urgent) c.urgent.copy(alpha = 0.35f) else c.line, RoundedCornerShape(Size.radius))
+            .border(1.dp, if (urgent) c.urgent.copy(alpha = 0.35f) else c.line, shape)
             .padding(20.dp),
+        verticalAlignment = Alignment.Top,
     ) {
-        Row(verticalAlignment = Alignment.Top) {
-            Box(Modifier.size(60.dp).clip(CircleShape).background(if (urgent) c.canvas else copy.tone.soft()), contentAlignment = Alignment.Center) {
-                Icon(copy.icon, contentDescription = null, tint = copy.tone.strong(), modifier = Modifier.size(36.dp))
-            }
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
+        Box(Modifier.size(64.dp).clip(CircleShape).background(if (urgent) c.canvas else copy.tone.soft()), contentAlignment = Alignment.Center) {
+            Icon(copy.icon, contentDescription = null, tint = copy.tone.strong(), modifier = Modifier.size(38.dp))
+        }
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.Top) {
                 Text(
                     listOfNotNull(copy.title, peopleText(item.frame.people).takeIf { item.frame.message.asksPeople }).joinToString(" · "),
                     fontSize = Type.title,
                     fontWeight = FontWeight.Bold,
                     color = c.ink,
+                    modifier = Modifier.weight(1f),
                 )
-                Text(
-                    listOfNotNull(
-                        if (item.kind == InboxKind.SERVER) "구조 서버에서 받음 · 차량 ${item.confirmations}대 확인" else routeText(item.frame.hop),
-                        whereText(item.frame, myFix),
-                    ).joinToString(" · "),
-                    fontSize = Type.body,
-                    color = c.body,
-                )
-                val notes = listOfNotNull(
-                    "내 차도 이어서 전달했어요".takeIf { item.relayState == RelayState.SENT },
-                    "구조 서버로 전달했어요".takeIf { item.forwarded },
-                )
-                if (notes.isNotEmpty()) Text(notes.joinToString(" · "), fontSize = Type.meta, color = c.mute)
+                Spacer(Modifier.width(12.dp))
+                Text(relativeTime(item.receivedAtMs, now), fontSize = Type.meta, color = c.mute, modifier = Modifier.padding(top = 6.dp))
             }
-            Text(relativeTime(item.receivedAtMs, now), fontSize = Type.meta, color = c.mute)
-        }
-        if (item.frame.message != RescueMessage.ACK && item.kind != InboxKind.SERVER) {
-            Spacer(Modifier.height(14.dp))
-            if (item.acknowledged) {
-                Row(Modifier.padding(start = 76.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Check, contentDescription = null, tint = c.safe, modifier = Modifier.size(28.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("응답했어요", fontSize = Type.meta, fontWeight = FontWeight.SemiBold, color = c.safe)
-                }
-            } else {
-                AppButton(
-                    "받았다고 알리기",
-                    onReply,
-                    Kind.SECONDARY,
-                    Modifier.padding(start = 76.dp),
-                    height = 64.dp,
-                    enabled = canReply,
+            Spacer(Modifier.height(6.dp))
+            val where = whereText(item.frame, myFix)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Place, contentDescription = null, tint = if (where != null) c.ink else c.mute, modifier = Modifier.size(28.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    where ?: "위치는 받지 못했어요",
+                    fontSize = Type.body,
+                    fontWeight = if (where != null) FontWeight.Bold else FontWeight.Normal,
+                    color = if (where != null) c.ink else c.mute,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                listOfNotNull(
+                    if (fromServer) "구조 서버에서 받음 · 차량 ${item.confirmations}대가 알림" else routeText(item.frame.hop),
+                    "내 차도 이어서 전달했어요".takeIf { item.relayState == RelayState.SENT },
+                    "구조 서버로 전달했어요".takeIf { item.forwarded && !fromServer },
+                ).joinToString(" · ").keepWords(),
+                fontSize = Type.meta,
+                color = c.body,
+            )
+            if (item.frame.message != RescueMessage.ACK && !fromServer) {
+                Spacer(Modifier.height(14.dp))
+                if (item.acknowledged) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Check, contentDescription = null, tint = c.safe, modifier = Modifier.size(28.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("응답했어요", fontSize = Type.meta, fontWeight = FontWeight.SemiBold, color = c.safe)
+                    }
+                } else {
+                    AppButton("받았다고 알리기", onReply, Kind.SECONDARY, Modifier.fillMaxWidth(), height = 64.dp, enabled = canReply)
+                }
             }
         }
     }
@@ -821,24 +843,44 @@ private fun RoundButton(text: String, enabled: Boolean, onClick: () -> Unit) {
 private fun MoreSheet(primary: List<RescueMessage>, onPick: (RescueMessage) -> Unit, onClose: () -> Unit) {
     val c = LocalAppColors.current
     SheetScrim(onClose) {
-        Sheet(width = 1100.dp) {
+        Sheet(width = 1400.dp) {
             Text("다른 메시지", fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink)
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(12.dp))
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
                 moreGroups(primary).forEach { (group, messages) ->
                     Text(group, fontSize = Type.meta, fontWeight = FontWeight.SemiBold, color = c.mute)
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(8.dp))
                     messages.chunked(3).forEach { row ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
-                            row.forEach { MessageTile(it, true, onPick, Modifier.weight(1f)) }
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            row.forEach { CompactMessageTile(it, onPick, Modifier.weight(1f)) }
                             repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                         }
-                        Spacer(Modifier.height(Size.gap))
+                        Spacer(Modifier.height(12.dp))
                     }
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(4.dp))
                 }
             }
             AppButton("닫기", onClose, Kind.SECONDARY, Modifier.fillMaxWidth())
+        }
+    }
+}
+
+/** Icon beside the text instead of above it: a third of the height of a first-screen tile. */
+@Composable
+private fun CompactMessageTile(message: RescueMessage, onPick: (RescueMessage) -> Unit, modifier: Modifier) {
+    val c = LocalAppColors.current
+    val copy = message.copy
+    val shape = RoundedCornerShape(Size.radius)
+    Row(
+        modifier.heightIn(min = 104.dp).clip(shape).background(c.canvas).border(1.dp, c.line, shape)
+            .clickable { onPick(message) }.padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(copy.icon, contentDescription = null, tint = copy.tone.strong(), modifier = Modifier.size(44.dp))
+        Spacer(Modifier.width(14.dp))
+        Column {
+            Text(copy.title, fontSize = Type.button, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(copy.detail.keepWords(), fontSize = Type.meta, color = c.mute, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -961,7 +1003,7 @@ private fun SwitchRow(title: String, detail: String, checked: Boolean, onToggle:
     ) {
         Column(Modifier.weight(1f)) {
             Text(title, fontSize = Type.body, fontWeight = FontWeight.SemiBold, color = c.ink)
-            Text(detail, fontSize = Type.meta, color = c.mute)
+            Text(detail.keepWords(), fontSize = Type.meta, color = c.mute)
         }
         Spacer(Modifier.width(20.dp))
         Switch(
@@ -1011,15 +1053,8 @@ private fun Banner(icon: ImageVector, text: String, color: Color, background: Co
     ) {
         Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(32.dp))
         Spacer(Modifier.width(14.dp))
-        Text(text, fontSize = Type.body, fontWeight = FontWeight.SemiBold, color = LocalAppColors.current.ink)
+        Text(text.keepWords(), fontSize = Type.body, fontWeight = FontWeight.SemiBold, color = LocalAppColors.current.ink)
     }
-}
-
-@Composable
-private fun Tag(text: String, color: Color, background: Color) {
-    Box(
-        Modifier.clip(RoundedCornerShape(10.dp)).background(background).padding(horizontal = 14.dp, vertical = 8.dp),
-    ) { Text(text, fontSize = Type.meta, fontWeight = FontWeight.SemiBold, color = color) }
 }
 
 enum class Kind { TONE, SECONDARY, STRONG_NEUTRAL }
@@ -1087,7 +1122,7 @@ private fun GuideBanner(guide: DisasterGuide, onClick: () -> Unit) {
     ) {
         Icon(guide.type.icon, contentDescription = null, tint = c.help, modifier = Modifier.size(40.dp))
         Spacer(Modifier.width(16.dp))
-        Text(guide.headline, fontSize = Type.body, fontWeight = FontWeight.SemiBold, color = c.ink, modifier = Modifier.weight(1f))
+        Text(guide.headline.keepWords(), fontSize = Type.body, fontWeight = FontWeight.SemiBold, color = c.ink, modifier = Modifier.weight(1f))
         Spacer(Modifier.width(12.dp))
         Text("행동요령 ›", fontSize = Type.body, fontWeight = FontWeight.Bold, color = c.help)
     }
@@ -1151,7 +1186,7 @@ private fun GuideSheet(guide: DisasterGuide, onClose: () -> Unit) {
                 }
                 guide.carRisk?.let {
                     SectionTitle("차에서 조심할 점")
-                    Text(it, fontSize = Type.body, color = c.ink, modifier = Modifier.padding(vertical = 6.dp))
+                    Text(it.keepWords(), fontSize = Type.body, color = c.ink, modifier = Modifier.padding(vertical = 6.dp))
                 }
                 SectionTitle("출처")
                 guide.sources.forEach {
@@ -1177,7 +1212,7 @@ internal fun GuideLine(mark: String, text: String, markColor: Color, foreign: Bo
         }
         Spacer(Modifier.width(14.dp))
         Text(
-            if (foreign) "$text (해외)" else text,
+            (if (foreign) "$text (해외)" else text).keepWords(),
             fontSize = Type.body,
             color = c.ink,
             modifier = Modifier.padding(top = 4.dp),
@@ -1201,7 +1236,7 @@ private fun AlertBanner(alert: OfficialAlert, current: DisasterType, onAccept: (
             Text("재난문자", fontSize = Type.body, fontWeight = FontWeight.Bold, color = c.urgent)
         }
         Spacer(Modifier.height(8.dp))
-        Text(alert.text, fontSize = Type.body, color = c.ink, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        Text(alert.text.keepWords(), fontSize = Type.body, color = c.ink, maxLines = 3, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(14.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
             AppButton("닫기", onDismiss, Kind.SECONDARY, Modifier.weight(1f), height = 64.dp)
