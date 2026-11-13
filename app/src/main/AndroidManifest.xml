@@ -22,6 +22,11 @@
     <uses-permission android:name="pleos.car.permission.CONTROL_CAR_LIGHTS" />
     <uses-permission android:name="pleos.car.permission.CAR_DRIVE" />
     <uses-permission android:name="pleos.car.permission.CAR_ENERGY" />
+    <!-- Energy-saving heating while waiting for rescue: heater, seat and steering wheel heating (read and set). -->
+    <uses-permission android:name="pleos.car.permission.CAR_CLIMATE" />
+    <uses-permission android:name="pleos.car.permission.CONTROL_CAR_CLIMATE" />
+    <uses-permission android:name="pleos.car.permission.CAR_SEATS" />
+    <uses-permission android:name="pleos.car.permission.CONTROL_CAR_SEATS" />
     <!-- Pleos TextToSpeech SDK (ON_DEVICE mode) for reading received messages aloud. -->
     <uses-permission android:name="pleos.car.permission.TTS_SERVICE" />
 

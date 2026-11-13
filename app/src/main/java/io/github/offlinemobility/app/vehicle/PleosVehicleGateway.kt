@@ -8,30 +8,30 @@ import ai.pleos.playground.vehicle.constant.control.LightSwitch
 import ai.pleos.playground.vehicle.constant.control.VehicleGear
 import ai.pleos.playground.vehicle.listener.GearSelectionListener
 import android.content.Context
+import io.github.offlinemobility.app.core.cabin.ClimateTarget
+import io.github.offlinemobility.app.core.cabin.Seat
 import io.github.offlinemobility.app.core.energy.EnergyReading
 import io.github.offlinemobility.app.core.light.Lamp
 import io.github.offlinemobility.app.core.light.LampSwitch
 import io.github.offlinemobility.app.core.safety.GearState
-import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.coroutines.resume
 
 /**
  * Pleos Vehicle SDK 2.3.2 binding.
  *
  * Required manifest permissions: pleos.car.permission.CAR_LIGHTS (read / capability),
- * CONTROL_CAR_LIGHTS (set), CAR_DRIVE (gear), CAR_ENERGY (battery / fuel). Every SDK call is IPC with callbacks, so each one is
- * wrapped in a timeout to keep the UI responsive when the vehicle service does not answer.
+ * CONTROL_CAR_LIGHTS (set), CAR_DRIVE (gear), CAR_ENERGY (battery / fuel); climate control is in
+ * [PleosClimate]. Every SDK call goes through [SdkCaller].
  */
 class PleosVehicleGateway(context: Context) : VehicleGateway {
     override val isSimulated: Boolean = false
 
     private val vehicle = Vehicle(context.applicationContext)
     private var initialized = false
+    private val sdk = SdkCaller { initialized }
+    private val climate = PleosClimate(vehicle, sdk)
 
     private val _gear = MutableStateFlow(GearState.UNKNOWN)
     override val gear: StateFlow<GearState> = _gear.asStateFlow()
@@ -119,6 +119,18 @@ class PleosVehicleGateway(context: Context) : VehicleGateway {
         return EnergyReading(evRemainingWh = level?.toDouble(), evPercent = soc, fuelPercent = fuel)
     }
 
+    override suspend fun climateSupport(): ClimateSupport = climate.support()
+
+    override suspend fun saveClimate(): Boolean = climate.save()
+
+    override suspend fun applyClimate(target: ClimateTarget, seats: Set<Seat>): Int = climate.apply(target, seats)
+
+    override suspend fun restoreClimate(): Int = climate.restore()
+
+    override suspend fun cabinTemperature(): Double? = climate.cabinTemperature()
+
+    override suspend fun occupiedSeats(): Set<Seat>? = climate.occupiedSeats()
+
     override fun release() {
         if (!initialized) return
         runCatching { vehicle.getGear().unregisterGearSelection(gearListener) }
@@ -126,36 +138,8 @@ class PleosVehicleGateway(context: Context) : VehicleGateway {
         initialized = false
     }
 
-    private suspend fun <T> call(
-        timeoutMs: Long = CALL_TIMEOUT_MS,
-        block: (done: (T?) -> Unit, fail: (Exception) -> Unit) -> Unit,
-    ): Result<T> {
-        if (!initialized) return Result.failure(IllegalStateException("Vehicle SDK가 초기화되지 않았습니다"))
-        val result = withTimeoutOrNull(timeoutMs) {
-            suspendCancellableCoroutine<Result<T>> { cont ->
-                runCatching {
-                    block(
-                        { value ->
-                            cont.resumeOnce(
-                                if (value != null) Result.success(value)
-                                else Result.failure(IllegalStateException("차량 서비스가 빈 값을 반환했습니다")),
-                            )
-                        },
-                        { error -> cont.resumeOnce(Result.failure(error)) },
-                    )
-                }.onFailure { cont.resumeOnce(Result.failure(it)) }
-            }
-        }
-        return result ?: Result.failure(IllegalStateException("차량 서비스 응답 시간 초과"))
-    }
-
-    private fun <T> CancellableContinuation<T>.resumeOnce(value: T) {
-        if (isActive) resume(value)
-    }
-
-    private companion object {
-        const val CALL_TIMEOUT_MS = 2_000L
-    }
+    private suspend fun <T> call(block: (done: (T?) -> Unit, fail: (Exception) -> Unit) -> Unit): Result<T> =
+        sdk.call(block = block)
 }
 
 private fun VehicleGear.toGearState(): GearState = when (this) {

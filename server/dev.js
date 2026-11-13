@@ -1,4 +1,4 @@
-// Local development server: `npm run dev`. Reads .env, serves the dashboard and the API.
+// Local development server: `npm run dev`. Reads .env, serves the dashboard, the relay page and the API.
 import { readFileSync, existsSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { handle } from './src/app.js';
@@ -13,13 +13,21 @@ if (existsSync(new URL('./.env', import.meta.url))) {
 }
 
 const port = Number(process.env.PORT ?? 8787);
-const dashboard = readFileSync(new URL('./public/index.html', import.meta.url));
+const page = (file, type) => ({ body: readFileSync(new URL(`./public/${file}`, import.meta.url)), type });
+const STATIC = {
+  '/': page('index.html', 'text/html'),
+  '/index.html': page('index.html', 'text/html'),
+  '/r': page('r.html', 'text/html'),
+  '/r.js': page('r.js', 'text/javascript'),
+  '/relay.js': page('relay.js', 'text/javascript'),
+};
 
 createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
-  if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'X-Content-Type-Options': 'nosniff' });
-    return res.end(dashboard);
+  if (req.method === 'GET' && Object.hasOwn(STATIC, url.pathname)) {
+    const file = STATIC[url.pathname];
+    res.writeHead(200, { 'Content-Type': `${file.type}; charset=utf-8`, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
+    return res.end(file.body);
   }
   let body = '';
   let tooLarge = false;

@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
@@ -68,6 +69,7 @@ import io.github.offlinemobility.app.InboxKind
 import io.github.offlinemobility.app.RelayState
 import io.github.offlinemobility.app.UiState
 import io.github.offlinemobility.app.VehicleMode
+import io.github.offlinemobility.app.core.cabin.WarmLevel
 import io.github.offlinemobility.app.core.disaster.DisasterGuide
 import io.github.offlinemobility.app.core.disaster.DisasterType
 import io.github.offlinemobility.app.core.disaster.WindowAdvice
@@ -104,12 +106,15 @@ class ScreenActions(
     val dismissAlert: (String) -> Unit,
     val acceptAlert: (OfficialAlert) -> Unit,
     val toggleVoice: () -> Unit,
+    val warmLevel: (WarmLevel) -> Unit,
+    val startKeepWarm: () -> Unit,
+    val stopKeepWarm: () -> Unit,
     val simulateIncoming: () -> Unit,
     val setGear: (GearState) -> Unit,
     val retryVehicle: () -> Unit,
 )
 
-private enum class Overlay { NONE, CONFIRM, MORE, SETTINGS, DISASTER, GUIDE, SHELTERS }
+private enum class Overlay { NONE, CONFIRM, MORE, SETTINGS, DISASTER, GUIDE, SHELTERS, KEEP_WARM, RELAY }
 
 @Composable
 fun MainScreen(state: UiState, actions: ScreenActions) {
@@ -142,12 +147,12 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 if (maxWidth > maxHeight) {
                     Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                        SendArea(state, actions, now, pick, onMore = { overlay = Overlay.MORE }, onGuide = { overlay = Overlay.GUIDE }, Modifier.weight(1.15f).fillMaxHeight())
+                        SendArea(state, actions, now, pick, onMore = { overlay = Overlay.MORE }, onGuide = { overlay = Overlay.GUIDE }, onKeepWarm = { overlay = Overlay.KEEP_WARM }, onRelay = { overlay = Overlay.RELAY }, Modifier.weight(1.15f).fillMaxHeight())
                         InboxArea(state, actions, now, Modifier.weight(0.85f).fillMaxHeight())
                     }
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                        SendArea(state, actions, now, pick, onMore = { overlay = Overlay.MORE }, onGuide = { overlay = Overlay.GUIDE }, Modifier.weight(0.58f).fillMaxWidth())
+                        SendArea(state, actions, now, pick, onMore = { overlay = Overlay.MORE }, onGuide = { overlay = Overlay.GUIDE }, onKeepWarm = { overlay = Overlay.KEEP_WARM }, onRelay = { overlay = Overlay.RELAY }, Modifier.weight(0.58f).fillMaxWidth())
                         InboxArea(state, actions, now, Modifier.weight(0.42f).fillMaxWidth())
                     }
                 }
@@ -180,6 +185,8 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
             Overlay.GUIDE -> GuideSheet(state.guide, onClose = { overlay = Overlay.NONE })
             Overlay.SHELTERS -> ShelterSheet(state, now, onClose = { overlay = Overlay.NONE })
             Overlay.SETTINGS -> SettingsSheet(state, actions, onClose = { overlay = Overlay.NONE })
+            Overlay.KEEP_WARM -> KeepWarmSheet(state, actions, onClose = { overlay = Overlay.NONE })
+            Overlay.RELAY -> RelaySheet(state.tx, onClose = { overlay = Overlay.NONE })
             Overlay.NONE -> Unit
         }
     }
@@ -202,8 +209,10 @@ private fun Header(state: UiState, onShelters: () -> Unit, onDisaster: () -> Uni
         Column(Modifier.weight(1f, fill = false)) {
             Text(text, fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
             state.endurance?.let { e ->
+                val warmHours = state.keepWarmEstimate?.takeIf { state.keepWarm.active }?.hours(state.keepWarm.level)
                 Text(
-                    "${if (e.isEv) "배터리" else "연료"} ${e.percent}% · 지금처럼 쓰면 ${Endurance.hoursWord(e.hours)} 버틸 수 있어요 (추정, 냉난방 제외)",
+                    if (warmHours != null) "배터리 ${e.percent}% · 난방을 아끼는 중 · ${warmHoursWord(warmHours)} 버틸 수 있어요 (추정)"
+                    else "${if (e.isEv) "배터리" else "연료"} ${e.percent}% · 지금처럼 쓰면 ${Endurance.hoursWord(e.hours)} 버틸 수 있어요 (추정, 냉난방 제외)",
                     fontSize = Type.meta,
                     color = if (e.low) c.help else c.mute,
                     maxLines = 1,
@@ -250,12 +259,14 @@ private fun SendArea(
     onPick: (RescueMessage) -> Unit,
     onMore: () -> Unit,
     onGuide: () -> Unit,
+    onKeepWarm: () -> Unit,
+    onRelay: () -> Unit,
     modifier: Modifier,
 ) {
     val tx = state.tx
     Column(modifier) {
         if (tx.active || tx.finished || tx.stopped) {
-            SendingPanel(state, actions)
+            SendingPanel(state, actions, onRelay, Modifier.weight(1f).fillMaxWidth())
         } else {
             val echo = state.inbox.firstOrNull { it.kind == InboxKind.ECHO && now - it.receivedAtMs < 10 * 60_000L }
             if (echo != null) {
@@ -313,6 +324,10 @@ private fun SendArea(
                     background = LocalAppColors.current.helpSoft,
                 )
             }
+        }
+        if (showKeepWarm(state)) {
+            Spacer(Modifier.height(Size.gap))
+            KeepWarmBar(state, onKeepWarm)
         }
     }
 }
@@ -398,7 +413,7 @@ private fun Tile(
 // ---------------------------------------------------------------- sending
 
 @Composable
-private fun SendingPanel(state: UiState, actions: ScreenActions) {
+private fun SendingPanel(state: UiState, actions: ScreenActions, onRelay: () -> Unit, modifier: Modifier) {
     val c = LocalAppColors.current
     val tx = state.tx
     val message = tx.message ?: RescueMessage.SOS
@@ -411,7 +426,7 @@ private fun SendingPanel(state: UiState, actions: ScreenActions) {
         else -> "‘${copy.title}’ 보내는 중"
     }
     Column(
-        Modifier.fillMaxSize().clip(RoundedCornerShape(Size.radius)).background(c.canvas)
+        modifier.clip(RoundedCornerShape(Size.radius)).background(c.canvas)
             .border(1.dp, c.line, RoundedCornerShape(Size.radius)).padding(28.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -473,7 +488,19 @@ private fun SendingPanel(state: UiState, actions: ScreenActions) {
             Text("통신이 끊겨 있어요 · 통신이 돌아오면 구조 서버로 자동으로 보내요", fontSize = Type.meta, color = c.mute)
         }
         if (tx.finished) {
+            Spacer(Modifier.height(12.dp))
             Text("근처 차량이 받으면 오른쪽 목록에 표시돼요", fontSize = Type.body, color = c.body)
+        }
+        Spacer(Modifier.height(Size.gap))
+        if (tx.relayUrl != null) {
+            AppButton(
+                "앱이 없는 사람에게 QR로 전달",
+                onRelay,
+                Kind.SECONDARY,
+                Modifier.fillMaxWidth(),
+                height = Size.secondaryButton,
+                icon = Icons.Filled.QrCode2,
+            )
             Spacer(Modifier.height(Size.gap))
         }
         if (tx.active) {
@@ -681,7 +708,7 @@ private fun InboxCard(item: InboxItem, now: Long, myFix: Fix?, canReply: Boolean
 // ---------------------------------------------------------------- sheets
 
 @Composable
-private fun SheetScrim(onDismiss: () -> Unit, content: @Composable () -> Unit) {
+internal fun SheetScrim(onDismiss: () -> Unit, content: @Composable () -> Unit) {
     Box(
         Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f))
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
@@ -690,7 +717,7 @@ private fun SheetScrim(onDismiss: () -> Unit, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun Sheet(width: Dp = 820.dp, content: @Composable ColumnScope.() -> Unit) {
+internal fun Sheet(width: Dp = 820.dp, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalAppColors.current
     Column(
         Modifier.widthIn(max = width).fillMaxWidth(0.92f).clip(RoundedCornerShape(24.dp)).background(c.canvas)
@@ -763,7 +790,7 @@ private fun ConfirmSheet(
 }
 
 @Composable
-private fun Stepper(value: Int, onChange: (Int) -> Unit) {
+internal fun Stepper(value: Int, onChange: (Int) -> Unit) {
     val c = LocalAppColors.current
     Row(verticalAlignment = Alignment.CenterVertically) {
         RoundButton("−", enabled = value > 0) { onChange(-1) }
@@ -784,10 +811,10 @@ private fun RoundButton(text: String, enabled: Boolean, onClick: () -> Unit) {
     val c = LocalAppColors.current
     Box(
         Modifier.size(Size.secondaryButton).clip(CircleShape).background(c.surface)
-            .border(1.dp, c.line, CircleShape).alpha(if (enabled) 1f else 0.4f)
+            .border(1.dp, c.line, CircleShape)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Text(text, fontSize = Type.display, fontWeight = FontWeight.Bold, color = c.ink) }
+    ) { Text(text, fontSize = Type.display, fontWeight = FontWeight.Bold, color = c.ink.copy(alpha = if (enabled) 1f else 0.4f)) }
 }
 
 @Composable
@@ -914,7 +941,7 @@ private fun SettingsSheet(state: UiState, actions: ScreenActions, onClose: () ->
 }
 
 @Composable
-private fun SectionTitle(text: String) {
+internal fun SectionTitle(text: String) {
     Text(
         text,
         fontSize = Type.meta,
@@ -948,7 +975,7 @@ private fun SwitchRow(title: String, detail: String, checked: Boolean, onToggle:
 }
 
 @Composable
-private fun InfoRow(label: String, content: @Composable RowScope.() -> Unit) {
+internal fun InfoRow(label: String, content: @Composable RowScope.() -> Unit) {
     val c = LocalAppColors.current
     Row(Modifier.fillMaxWidth().heightIn(min = 96.dp).padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, fontSize = Type.body, color = c.body, modifier = Modifier.width(240.dp))
@@ -969,7 +996,7 @@ private fun Segment(text: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun Divider() {
+internal fun Divider() {
     Box(Modifier.fillMaxWidth().height(1.dp).background(LocalAppColors.current.line))
 }
 
@@ -1010,15 +1037,17 @@ fun AppButton(
     fontSize: TextUnit = Type.button,
 ) {
     val c = LocalAppColors.current
+    // A disabled button is faded through its colours, not an alpha layer: a filled button keeps its
+    // label readable on a paler fill, an outlined one keeps its outline and pales the label.
+    val fade = if (enabled) 1f else 0.4f
     val (bg, fg, border) = when (kind) {
-        Kind.TONE -> Triple(tone.strong(), c.onStrong, null)
-        Kind.SECONDARY -> Triple(c.canvas, c.ink, BorderStroke(1.dp, c.line))
-        Kind.STRONG_NEUTRAL -> Triple(c.ink, c.page, null)
+        Kind.TONE -> Triple(tone.strong().copy(alpha = fade), c.onStrong, null)
+        Kind.SECONDARY -> Triple(c.canvas, c.ink.copy(alpha = fade), BorderStroke(1.dp, c.line))
+        Kind.STRONG_NEUTRAL -> Triple(c.ink.copy(alpha = fade), c.page, null)
     }
     Row(
         modifier.heightIn(min = height).clip(RoundedCornerShape(Size.radius)).background(bg)
             .let { if (border != null) it.border(border, RoundedCornerShape(Size.radius)) else it }
-            .alpha(if (enabled) 1f else 0.4f)
             .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 24.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
@@ -1140,7 +1169,7 @@ private fun GuideSheet(guide: DisasterGuide, onClose: () -> Unit) {
 }
 
 @Composable
-private fun GuideLine(mark: String, text: String, markColor: Color, foreign: Boolean) {
+internal fun GuideLine(mark: String, text: String, markColor: Color, foreign: Boolean) {
     val c = LocalAppColors.current
     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.Top) {
         Box(Modifier.size(40.dp).clip(CircleShape).background(c.surface), contentAlignment = Alignment.Center) {

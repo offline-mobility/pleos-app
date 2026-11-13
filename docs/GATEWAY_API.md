@@ -83,8 +83,30 @@ Content-Type: application/json; charset=utf-8
 | `GET /api/incidents` | 전체 구조 요청. `Authorization: Bearer {DASHBOARD_TOKEN}` 필요. 토큰이 없으면 꺼짐(503) | `{incidents:[{uid, id, message, people, hop, lat, lon, firstHeardAt, lastHeardAt, fromSender, confirmations}]}` |
 | `GET /api/health` | 설정 상태 | `{ok, alerts, shelters, dashboard}` |
 | `GET /` | 구조 상황판(지도) | HTML |
+| `GET /r?…` | QR 전달 페이지. 아래 "QR 전달" 참고 | HTML |
 
 `source`: `live`(공공 API), `sample`(`SAMPLE_DATA=1`인 개발 서버의 견본), `unconfigured`(키 없음, 빈 목록).
+
+## QR 전달
+
+앱이 없는 사람의 휴대폰이 구조 요청을 대신 올린다. 차량은 보낸 요청을 아래 주소의 QR 코드로 띄운다.
+
+```
+{SERVER_URL}/r?m=MEDICAL&p=2&i=a1-3&h=0&t=1794000000&la=37.49787&lo=127.02759
+```
+
+| 값 | 설명 |
+|---|---|
+| `m` | 메시지 코드 |
+| `p` | 인원 0–15 |
+| `i` | `reports[].id`와 같은 형식 |
+| `h` | 홉 0–3 |
+| `t` | 차량이 보낸 시각 (Unix 초) |
+| `la`, `lo` | 위치. 위치를 보내지 않으면 둘 다 없다 |
+
+- 페이지(`public/r.html`, `r.js`, `relay.js`)는 값을 검증해 요약을 보여 주고, 사람이 `구조 서버로 전달하기`를 누르면 `POST /api/reports`로 보낸다. `own`은 false, `reporter`는 휴대폰 브라우저에 저장한 무작위 UUID다.
+- 값이 하나라도 형식에 맞지 않으면 전송 버튼을 보여 주지 않는다.
+- 휴대폰이 통신이 없는 곳에서 찍었으면 페이지가 열리지 않는다. 통신이 되는 곳에서 주소를 다시 열어야 한다.
 
 ## 공공 데이터
 

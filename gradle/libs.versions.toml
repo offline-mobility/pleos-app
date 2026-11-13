@@ -25,6 +25,7 @@ vehicle-sdk = { module = "ai.pleos.playground:Vehicle", version.ref = "vehicleSd
 tts-sdk = { module = "ai.pleos.playground:TextToSpeech", version.ref = "ttsSdk" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 json = { module = "org.json:json", version = "20240303" }
+zxing-core = { module = "com.google.zxing:core", version = "3.5.3" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

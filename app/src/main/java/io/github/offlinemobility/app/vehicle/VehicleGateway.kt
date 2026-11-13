@@ -1,5 +1,7 @@
 package io.github.offlinemobility.app.vehicle
 
+import io.github.offlinemobility.app.core.cabin.ClimateTarget
+import io.github.offlinemobility.app.core.cabin.Seat
 import io.github.offlinemobility.app.core.energy.EnergyReading
 import io.github.offlinemobility.app.core.light.Lamp
 import io.github.offlinemobility.app.core.light.LampSwitch
@@ -14,6 +16,9 @@ enum class LampSupport(val label: String) {
     UNSUPPORTED("미지원"),
     UNKNOWN("확인 실패"),
 }
+
+/** Which parts of the climate system the app may control on this vehicle. */
+data class ClimateSupport(val heater: Boolean = false, val seatHeat: Boolean = false, val wheelHeat: Boolean = false)
 
 /** Vehicle functions the app needs, independent of the SDK so the UI and tests can use a fake. */
 interface VehicleGateway {
@@ -30,6 +35,23 @@ interface VehicleGateway {
 
     /** Battery / fuel levels; fields the vehicle does not report stay null. */
     suspend fun energy(): EnergyReading
+
+    suspend fun climateSupport(): ClimateSupport
+
+    /** Remembers the current climate settings so [restoreClimate] can put them back. False if nothing could be read. */
+    suspend fun saveClimate(): Boolean
+
+    /** Applies [target]; seat heating goes to [seats] only. Returns how many settings the vehicle refused this time. */
+    suspend fun applyClimate(target: ClimateTarget, seats: Set<Seat>): Int
+
+    /** Puts back what [saveClimate] remembered. Returns the number of settings that could not be restored. */
+    suspend fun restoreClimate(): Int
+
+    /** Cabin air temperature in °C, or null when the vehicle does not report it. */
+    suspend fun cabinTemperature(): Double?
+
+    /** Seats the vehicle reports as occupied, or null when it does not report occupancy. */
+    suspend fun occupiedSeats(): Set<Seat>?
     fun release()
 }
 
@@ -66,6 +88,37 @@ class SimulatedVehicleGateway : VehicleGateway {
     override suspend fun isLampLit(lamp: Lamp): Result<Boolean> = Result.success(lamps.getValue(lamp) == LampSwitch.ON)
 
     override suspend fun energy(): EnergyReading = EnergyReading(evRemainingWh = 54_000.0, evPercent = 70)
+
+    private var climate = ClimateTarget(hvacOn = true, setpointC = 22f, fan = 3, freshAir = true, seatLevel = 0, wheelLevel = 0)
+    private var savedClimate: ClimateTarget? = null
+    private var cabinC = 20.0
+
+    override suspend fun climateSupport() = ClimateSupport(heater = true, seatHeat = true, wheelHeat = true)
+
+    override suspend fun saveClimate(): Boolean {
+        savedClimate = climate
+        return true
+    }
+
+    override suspend fun applyClimate(target: ClimateTarget, seats: Set<Seat>): Int {
+        climate = target
+        return 0
+    }
+
+    override suspend fun restoreClimate(): Int {
+        savedClimate?.let { climate = it }
+        savedClimate = null
+        return 0
+    }
+
+    /** Drifts towards the setpoint while heating and cools while the heater rests, so the cycle is visible. */
+    override suspend fun cabinTemperature(): Double {
+        cabinC = if (climate.hvacOn && cabinC < climate.setpointC) (cabinC + 1.5).coerceAtMost(climate.setpointC.toDouble())
+        else (cabinC - 1.0).coerceAtLeast(5.0)
+        return cabinC
+    }
+
+    override suspend fun occupiedSeats(): Set<Seat>? = null
 
     override fun release() = Unit
 }

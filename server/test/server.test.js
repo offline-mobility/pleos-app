@@ -4,6 +4,7 @@ import { classify, regionMatches, sidoKey } from '../src/alerts.js';
 import { handle } from '../src/app.js';
 import { MemoryStore } from '../src/store.js';
 import { kstDate, mapAlert, mapShelter, parseKst } from '../src/upstream.js';
+import { parseRelayLink, relaySummary } from '../public/relay.js';
 
 const NOW = 1_794_000_000_000;
 const REPORTER_A = '123e4567-e89b-12d3-a456-426614174000';
@@ -169,4 +170,29 @@ test('upstream parsing helpers', async () => {
   const fetchFn = async () => ({ ok: true, json: async () => ({ header: { resultCode: '30' }, body: null }) });
   const r = await call({ ...deps({ SAFETYDATA_SHELTER_KEY: 'k' }), fetchFn }, 'GET', '/api/shelters', { query: { lat: '37.5', lon: '127.0' } });
   assert.equal(r.status, 502);
+});
+
+test('a QR relay link becomes one report the upload endpoint accepts', async () => {
+  // Same shape the app builds (RelayLink.kt); t is in seconds.
+  const seconds = Math.floor((NOW - 120_000) / 1000);
+  const report = parseRelayLink(`?m=MEDICAL&p=2&i=a1-3&h=0&t=${seconds}&la=37.49787&lo=127.02759`);
+  assert.deepEqual(report, { id: 'a1-3', message: 'MEDICAL', people: 2, hop: 0, own: false, heardAt: seconds * 1000, lat: 37.49787, lon: 127.02759 });
+  assert.equal(relaySummary(report), '응급 환자 · 2명');
+  assert.equal(relaySummary(parseRelayLink(`?m=ROAD_BLOCKED&p=3&i=0f-0&h=1&t=${seconds}`)), '앞길 막힘');
+
+  const d = deps({ DASHBOARD_TOKEN: 't' });
+  const r = await call(d, 'POST', '/api/reports', { body: upload(REPORTER_A, [report]) });
+  assert.deepEqual([r.status, r.json.accepted, r.json.created], [200, 1, 1]);
+});
+
+test('a tampered relay link is rejected as a whole', () => {
+  const ok = 'm=SOS&p=1&i=a1-3&h=0&t=1794000000';
+  assert.notEqual(parseRelayLink(`?${ok}`), null);
+  for (const bad of [
+    '', 'm=SOS', ok.replace('m=SOS', 'm=<script>'), ok.replace('m=SOS', 'm=constructor'), ok.replace('m=SOS', 'm=ACK'),
+    ok.replace('p=1', 'p=16'), ok.replace('p=1', 'p=1e1'), ok.replace('i=a1-3', 'i=A1-3'), ok.replace('h=0', 'h=4'),
+    ok.replace('t=1794000000', 't=-5'), `${ok}&la=37.5`, `${ok}&la=91.0&lo=127.0`, `${ok}&la=37.5&lo=abc`,
+  ]) {
+    assert.equal(parseRelayLink(`?${bad}`), null, bad);
+  }
 });

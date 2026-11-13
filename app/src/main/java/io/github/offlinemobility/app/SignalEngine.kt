@@ -10,15 +10,22 @@ import io.github.offlinemobility.app.ui.copy
 import io.github.offlinemobility.app.core.acoustic.AcousticModem
 import io.github.offlinemobility.app.core.acoustic.DecodedSignal
 import io.github.offlinemobility.app.core.acoustic.ModemConfig
+import io.github.offlinemobility.app.core.cabin.KeepWarm
+import io.github.offlinemobility.app.core.cabin.KeepWarmController
+import io.github.offlinemobility.app.core.cabin.KeepWarmEstimate
+import io.github.offlinemobility.app.core.cabin.WarmLevel
 import io.github.offlinemobility.app.core.disaster.DisasterGuide
 import io.github.offlinemobility.app.core.disaster.DisasterGuides
 import io.github.offlinemobility.app.core.disaster.DisasterType
+import io.github.offlinemobility.app.core.disaster.WindowAdvice
 import io.github.offlinemobility.app.core.energy.Endurance
 import io.github.offlinemobility.app.core.energy.EnduranceEstimate
 import io.github.offlinemobility.app.core.energy.EnergyReading
+import io.github.offlinemobility.app.core.gateway.RelayLink
 import io.github.offlinemobility.app.core.gateway.RescueReport
 import io.github.offlinemobility.app.core.online.OfficialAlert
 import io.github.offlinemobility.app.core.online.RemoteIncident
+import io.github.offlinemobility.app.core.online.ShelterFinder
 import io.github.offlinemobility.app.gateway.GatewayStatus
 import io.github.offlinemobility.app.net.ServerClient
 import io.github.offlinemobility.app.online.OnlineState
@@ -43,6 +50,8 @@ import io.github.offlinemobility.app.core.safety.SafetyGate
 import io.github.offlinemobility.app.core.safety.SafetyVerdict
 import io.github.offlinemobility.app.core.safety.TransmitChannel
 import io.github.offlinemobility.app.core.safety.VehicleSafetyState
+import io.github.offlinemobility.app.vehicle.ClimateSupport
+import io.github.offlinemobility.app.vehicle.KeepWarmRunner
 import io.github.offlinemobility.app.vehicle.LampSupport
 import io.github.offlinemobility.app.vehicle.LightSignalRunner
 import io.github.offlinemobility.app.vehicle.PleosVehicleGateway
@@ -52,6 +61,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -108,6 +118,8 @@ data class TxState(
     val message: RescueMessage? = null,
     val people: Int = 0,
     val lastFrame: RescueFrame? = null,
+    /** Link for the QR code that lets a phone carry [lastFrame] to the rescue server; null without a server. */
+    val relayUrl: String? = null,
     val lastResult: String? = null,
     val sosBeeping: Boolean = false,
     /** Every planned channel has finished on its own (not stopped). */
@@ -116,6 +128,21 @@ data class TxState(
 ) {
     val active: Boolean get() = soundActive || lightActive
 }
+
+/** Energy-saving heating while waiting for rescue. */
+data class KeepWarmState(
+    val support: ClimateSupport = ClimateSupport(),
+    val level: WarmLevel = WarmLevel.SAVER,
+    val active: Boolean = false,
+    /** Heater or blower currently running (false while the heater rests between cycles). */
+    val hvacOn: Boolean = false,
+    val freshAir: Boolean = false,
+    val cabinC: Double? = null,
+    /** The vehicle refused at least one setting. */
+    val refused: Boolean = false,
+    /** Why heating went back to normal without the user asking. */
+    val endedNote: String? = null,
+)
 
 data class UiState(
     val vehicleMode: VehicleMode = VehicleMode.CONNECTING,
@@ -151,11 +178,26 @@ data class UiState(
     val gateway: GatewayStatus = GatewayStatus(enabled = false),
     val online: OnlineState = OnlineState(),
     val dismissedAlerts: Set<String> = emptySet(),
+    val keepWarm: KeepWarmState = KeepWarmState(),
 ) {
     val guide: DisasterGuide get() = DisasterGuides.of(disaster)
 
     /** Newest official message the user has not closed yet. */
     val topAlert: OfficialAlert? get() = online.alerts.firstOrNull { it.id !in dismissedAlerts }
+
+    /** Outside air has to stay out in this disaster mode (chemical, radiation, smoke). */
+    val cabinSealed: Boolean get() = guide.window == WindowAdvice.KEEP_CLOSED
+
+    /** Null on vehicles without a traction battery reading or a controllable heater. */
+    val keepWarmEstimate: KeepWarmEstimate?
+        get() {
+            if (!keepWarm.support.heater) return null
+            val remainingWh = energy?.evRemainingWh?.takeIf { it > 0 } ?: return null
+            val shelterKm = myFix?.let { fix ->
+                ShelterFinder.nearest(online.shelters, fix.latitude, fix.longitude, 1).firstOrNull()?.second?.meters?.div(1000.0)
+            }
+            return KeepWarm.estimate(remainingWh, people, cabinSealed, shelterKm)
+        }
 
     val endurance: EnduranceEstimate? get() = energy?.let { Endurance.estimate(it, lightsOn = lightUsable) }
 
@@ -210,6 +252,8 @@ class SignalEngine(application: Application) {
     private var lightJob: Job? = null
     private var gearJob: Job? = null
     private var energyJob: Job? = null
+    private var warmJob: Job? = null
+    private var peopleEdited = false
     private var inboxId = 0L
 
     fun dismissAlert(id: String) = _state.update { it.copy(dismissedAlerts = it.dismissedAlerts + id) }
@@ -305,8 +349,12 @@ class SignalEngine(application: Application) {
             }
 
             val support = Lamp.entries.associateWith { gateway.lampSupport(it) }
-            debugLog { "vehicle mode=$mode ${result.exceptionOrNull()?.message ?: ""} lamps=$support" }
-            _state.update { it.copy(lampSupport = support) }
+            val climate = gateway.climateSupport()
+            debugLog { "vehicle mode=$mode ${result.exceptionOrNull()?.message ?: ""} lamps=$support climate=$climate" }
+            _state.update { it.copy(lampSupport = support, keepWarm = it.keepWarm.copy(support = climate)) }
+            // Head count starts from the seat sensors until the user sets it.
+            val occupied = gateway.occupiedSeats()?.size ?: 0
+            if (occupied > 0 && !peopleEdited) _state.update { it.copy(people = occupied) }
         }
     }
 
@@ -314,12 +362,54 @@ class SignalEngine(application: Application) {
         debugLog { "gear=$gear" }
         _state.update { it.copy(gear = gear) }
         // Leaving P stops every outgoing signal immediately; lamps are restored by the runner.
-        if (gear != GearState.PARK) stopTransmission("P단 해제로 송신을 중단했습니다")
+        if (gear != GearState.PARK) {
+            stopTransmission("P단 해제로 송신을 중단했습니다")
+            stopKeepWarm("기어를 바꿔서 난방을 원래대로 돌려놓았어요")
+        }
+    }
+
+    fun selectWarmLevel(level: WarmLevel) =
+        _state.update { if (it.keepWarm.active) it else it.copy(keepWarm = it.keepWarm.copy(level = level)) }
+
+    /** Starts energy-saving heating. Only while parked; the runner restores the climate settings when it ends. */
+    fun startKeepWarm() {
+        val s = _state.value
+        val estimate = s.keepWarmEstimate ?: return
+        if (s.gear != GearState.PARK) return
+        val controller = KeepWarmController(s.keepWarm.level, s.cabinSealed, estimate.freshMinutes)
+        val runner = KeepWarmRunner(gateway)
+        val previous = warmJob
+        _state.update { it.copy(keepWarm = it.keepWarm.copy(active = true, hvacOn = false, freshAir = false, refused = false, endedNote = null)) }
+        warmJob = scope.launch {
+            // A plan that is still restoring the climate must finish first, or its restore would undo this one.
+            previous?.cancelAndJoin()
+            runner.run(controller, s.people.coerceAtLeast(1)) { tick ->
+                _state.update {
+                    it.copy(
+                        keepWarm = it.keepWarm.copy(
+                            hvacOn = tick.target.hvacOn,
+                            freshAir = tick.target.freshAir,
+                            cabinC = tick.cabinC,
+                            refused = tick.failures > 0,
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    fun stopKeepWarm(note: String? = null) {
+        if (!_state.value.keepWarm.active) return
+        warmJob?.cancel()
+        _state.update { it.copy(keepWarm = it.keepWarm.copy(active = false, hvacOn = false, freshAir = false, endedNote = note)) }
     }
 
     fun select(message: RescueMessage) = _state.update { if (it.tx.active) it else it.copy(selected = message) }
 
-    fun changePeople(delta: Int) = _state.update { it.copy(people = (it.people + delta).coerceIn(0, 15)) }
+    fun changePeople(delta: Int) {
+        peopleEdited = true
+        _state.update { it.copy(people = (it.people + delta).coerceIn(0, 15)) }
+    }
 
     fun toggleSound() = _state.update { if (it.tx.active) it else it.copy(useSound = !it.useSound) }
 
@@ -358,7 +448,10 @@ class SignalEngine(application: Application) {
                 blackoutByMode = false
             }
         }
+        val wasSealed = _state.value.cabinSealed
         _state.update { it.copy(disaster = type) }
+        // Whether outside air may come in is fixed when the heating plan starts, so start it again.
+        if (_state.value.keepWarm.active && _state.value.cabinSealed != wasSealed) startKeepWarm()
     }
 
     /** Starts GPS when permission is available (called again after the user grants it). */
@@ -451,6 +544,7 @@ class SignalEngine(application: Application) {
                     message = frame.message,
                     people = frame.people,
                     lastFrame = frame,
+                    relayUrl = RelayLink.url(BuildConfig.SERVER_URL, frame, System.currentTimeMillis()),
                 ),
             )
         }
