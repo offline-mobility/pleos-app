@@ -33,7 +33,7 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 17)
 ./gradlew testDebugUnitTest assembleDebug
 
 # release (R8 축소·서명). 서명 키는 저장소에 없으며 keystore.properties로 지정합니다.
-./gradlew assembleRelease -PserverUrl=https://구조서버주소   # 비우면 온라인 기능이 꺼집니다
+./gradlew assembleRelease -PserverUrl=https://offline-mobility.vercel.app   # 비우면 온라인 기능이 꺼집니다
 
 # 구조 서버 (로컬)
 cd server && cp .env.example .env && npm run dev   # http://localhost:8787

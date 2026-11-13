@@ -1,4 +1,7 @@
 {
+  "regions": [
+    "icn1"
+  ],
   "outputDirectory": "public",
   "rewrites": [
     {

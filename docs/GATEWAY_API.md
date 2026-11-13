@@ -137,7 +137,13 @@ Content-Type: application/json; charset=utf-8
 
 ## 배포 (Vercel)
 
+배포 주소: `https://offline-mobility.vercel.app` (2026-11-13 배포, 무료 요금제)
+
 1. `cd server && vercel login && vercel link` (프로젝트 이름에 개인 정보가 들어가지 않게 한다)
-2. 환경변수 등록: `SAFETYDATA_ALERT_KEY`, `SAFETYDATA_SHELTER_KEY`, `DASHBOARD_TOKEN`(`openssl rand -hex 32`), Upstash Redis의 `UPSTASH_REDIS_REST_URL`·`UPSTASH_REDIS_REST_TOKEN`. `SAMPLE_DATA`는 넣지 않는다.
-3. `vercel deploy --prod` 후 `https://…/api/health` 확인
-4. 앱 빌드: `./gradlew assembleRelease -PserverUrl=https://배포주소`
+2. 환경변수 등록: `SAFETYDATA_ALERT_KEY`, `SAFETYDATA_SHELTER_KEY`, `DASHBOARD_TOKEN`(`openssl rand -hex 32`). `SAMPLE_DATA`는 넣지 않는다. 키 앞뒤에 공백이 들어가면 공공 API가 "등록되지 않은 키"(코드 30)로 거절한다.
+3. 저장소: Vercel 대시보드의 Storage에서 Upstash Redis를 프로젝트에 연결한다(`KV_REST_API_URL`·`KV_REST_API_TOKEN`이 자동 등록됨. Upstash에서 직접 만들었다면 `UPSTASH_REDIS_REST_URL`·`UPSTASH_REDIS_REST_TOKEN`). 연결하지 않으면 메모리에만 저장해 서버가 재시작될 때 구조 요청이 사라지고, `/api/health`의 `storage`가 `memory`로 나온다.
+4. `vercel deploy --prod` 후 `https://…/api/health` 확인
+5. 앱 빌드: `./gradlew assembleRelease -PserverUrl=https://배포주소`
+
+- 함수는 서울 리전(`icn1`)에서 실행한다(`vercel.json`). 공공 API가 국내에 있어 응답이 빠르다.
+- 실패한 요청의 이유는 서버 로그에 남기되 서비스 키는 지운다. 호출한 쪽에는 이유를 돌려주지 않는다.

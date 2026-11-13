@@ -96,9 +96,10 @@ export class UpstashStore {
 let shared;
 
 export function createStore(env) {
-  if (env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) {
-    return new UpstashStore(env.UPSTASH_REDIS_REST_URL, env.UPSTASH_REDIS_REST_TOKEN);
-  }
+  // Upstash's own names, or the ones Vercel's Upstash integration adds to a project.
+  const url = env.UPSTASH_REDIS_REST_URL || env.KV_REST_API_URL;
+  const token = env.UPSTASH_REDIS_REST_TOKEN || env.KV_REST_API_TOKEN;
+  if (url && token) return new UpstashStore(url, token);
   shared ??= new MemoryStore();
   return shared;
 }

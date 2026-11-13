@@ -14,7 +14,8 @@ const KST_OFFSET_MS = 9 * 3_600_000;
 async function fetchPages(id, key, params, fetchFn, maxPages = MAX_PAGES) {
   const rows = [];
   for (let page = 1; page <= maxPages; page++) {
-    const query = new URLSearchParams({ serviceKey: key, returnType: 'json', numOfRows: String(PAGE_SIZE), pageNo: String(page), ...params });
+    // A key pasted with a trailing space or line break is rejected upstream as unregistered (code 30).
+    const query = new URLSearchParams({ serviceKey: String(key).trim(), returnType: 'json', numOfRows: String(PAGE_SIZE), pageNo: String(page), ...params });
     const res = await fetchFn(`${BASE}/${id}?${query}`, { signal: AbortSignal.timeout(maxPages > MAX_PAGES ? 30_000 : 8000) });
     if (!res.ok) throw new Error(`upstream http ${res.status}`);
     const data = await res.json();

@@ -59,6 +59,8 @@ export async function handle(request, deps) {
           shelters: env.SAFETYDATA_SHELTER_KEY ? 'live' : env.SAMPLE_DATA === '1' ? 'sample' : 'unconfigured',
           civilShelters: CIVIL_SNAPSHOT,
           dashboard: Boolean(env.DASHBOARD_TOKEN),
+          // "memory" loses rescue requests whenever the server restarts.
+          storage: (env.UPSTASH_REDIS_REST_URL || env.KV_REST_API_URL) ? 'redis' : 'memory',
         });
 
       case 'POST /api/reports': {
@@ -113,7 +115,10 @@ export async function handle(request, deps) {
     }
   } catch (error) {
     if (error instanceof HttpError) return json(error.status, { error: error.message });
-    // Never leak internals (upstream URLs contain the service key).
+    // Never leak internals to the caller (upstream URLs contain the service key). The server log
+    // gets the reason with any key removed.
+    const reason = `${error?.name}: ${error?.message}${error?.cause?.code ? ` (${error.cause.code})` : ''}`;
+    console.error('request failed:', request.path, reason.replace(/serviceKey=[^&\s]+/g, 'serviceKey=<key>').slice(0, 300));
     return json(502, { error: 'upstream or server error' });
   }
 }
