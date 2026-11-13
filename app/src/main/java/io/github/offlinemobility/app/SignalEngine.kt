@@ -233,7 +233,8 @@ class SignalEngine(application: Application) {
     private val locationTracker = LocationTracker(application)
     private val announcer = VoiceAnnouncer(application, scope)
     private val outbox = RescueOutbox(application)
-    private val server = ServerClient(BuildConfig.SERVER_URL)
+    private val serverUrl: String = application.getString(R.string.server_url)
+    private val server = ServerClient(serverUrl)
     private val uploader = GatewayUploader(application, outbox, server, scope)
     private val onlineSync = OnlineSync(
         application,
@@ -544,7 +545,7 @@ class SignalEngine(application: Application) {
                     message = frame.message,
                     people = frame.people,
                     lastFrame = frame,
-                    relayUrl = RelayLink.url(BuildConfig.SERVER_URL, frame, System.currentTimeMillis()),
+                    relayUrl = RelayLink.url(serverUrl, frame, System.currentTimeMillis()),
                 ),
             )
         }

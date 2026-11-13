@@ -1235,8 +1235,13 @@ private fun ShelterSheet(state: UiState, now: Long, onClose: () -> Unit) {
                     Text("내 위치를 아직 몰라 거리 대신 목록만 보여 드려요", fontSize = Type.body, color = c.help)
                     Spacer(Modifier.height(8.dp))
                 }
-                val rows = if (fix != null) ShelterFinder.nearest(state.online.shelters, fix.latitude, fix.longitude, 6)
-                else state.online.shelters.take(6).map { it to null }
+                val preferKind = ShelterFinder.preferredKind(state.disaster)
+                val rows = if (fix != null) ShelterFinder.nearest(state.online.shelters, fix.latitude, fix.longitude, 6, preferKind)
+                else state.online.shelters.sortedBy { preferKind != null && !it.kind.contains(preferKind) }.take(6).map { it to null }
+                if (preferKind != null && rows.any { it.first.kind.contains(preferKind) }) {
+                    Text("‘${state.disaster.label}’ 상황에 맞는 곳을 먼저 보여 드려요", fontSize = Type.body, color = c.body)
+                    Spacer(Modifier.height(8.dp))
+                }
                 rows.forEach { (shelter, offset) ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(60.dp).clip(CircleShape).background(c.safeSoft), contentAlignment = Alignment.Center) {
@@ -1246,7 +1251,7 @@ private fun ShelterSheet(state: UiState, now: Long, onClose: () -> Unit) {
                         Column(Modifier.weight(1f)) {
                             Text(shelter.name, fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(
-                                listOfNotNull(shelter.kind.ifEmpty { null }, shelter.capacity?.let { "${it}명 수용" }, shelter.address.ifEmpty { null })
+                                listOfNotNull(shelter.kind.ifEmpty { null }, shelter.capacity?.let { "약 ${"%,d".format(it)}명" }, shelter.address.ifEmpty { null })
                                     .joinToString(" · "),
                                 fontSize = Type.meta,
                                 color = c.body,

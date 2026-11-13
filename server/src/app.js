@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { getAlerts } from './alerts.js';
+import { CIVIL_SNAPSHOT } from './civil.js';
 import { HttpError } from './errors.js';
 import { isLat, isLon, parseCoord } from './geo.js';
 import { ingest, LIMITS, listIncidents, nearbyIncidents, parseUpload } from './reports.js';
@@ -56,6 +57,7 @@ export async function handle(request, deps) {
           ok: true,
           alerts: env.SAFETYDATA_ALERT_KEY ? 'live' : env.SAMPLE_DATA === '1' ? 'sample' : 'unconfigured',
           shelters: env.SAFETYDATA_SHELTER_KEY ? 'live' : env.SAMPLE_DATA === '1' ? 'sample' : 'unconfigured',
+          civilShelters: CIVIL_SNAPSHOT,
           dashboard: Boolean(env.DASHBOARD_TOKEN),
         });
 

@@ -2,6 +2,7 @@ package io.github.offlinemobility.app.core
 
 import io.github.offlinemobility.app.core.disaster.DisasterType
 import io.github.offlinemobility.app.core.online.OnlineJson
+import io.github.offlinemobility.app.core.online.Shelter
 import io.github.offlinemobility.app.core.online.ShelterFinder
 import io.github.offlinemobility.app.core.protocol.RescueMessage
 import org.junit.Assert.assertEquals
@@ -39,6 +40,25 @@ class OnlineJsonTest {
         assertEquals("near", nearest.first().first.id)
         assertTrue(nearest.first().second.meters < 100)
         assertNull(result.items.first { it.id == "near" }.capacity)
+    }
+
+    @Test
+    fun sheltersForTheCurrentDisasterComeFirstHoweverFar() {
+        fun shelter(name: String, kind: String, lat: Double) = Shelter(name, name, kind, lat, 127.0, "", null)
+        val all = listOf(
+            shelter("경로당", "한파쉼터,무더위쉼터", 37.5001),
+            shelter("운동장", "지진옥외대피장소", 37.5050),
+            shelter("지하주차장", "민방위대피소", 37.5200),
+            shelter("지하상가", "민방위대피소", 37.5100),
+        )
+        fun names(disaster: DisasterType) =
+            ShelterFinder.nearest(all, 37.5, 127.0, 3, ShelterFinder.preferredKind(disaster)).map { it.first.name }
+
+        assertEquals(listOf("경로당", "운동장", "지하상가"), names(DisasterType.GENERAL))
+        assertEquals(listOf("지하상가", "지하주차장", "경로당"), names(DisasterType.AIR_RAID))
+        assertEquals(listOf("운동장", "경로당", "지하상가"), names(DisasterType.EARTHQUAKE))
+        assertEquals(listOf("경로당", "운동장", "지하상가"), names(DisasterType.SNOW_COLD))
+        assertEquals("경로당", names(DisasterType.HEAT).first())
     }
 
     @Test

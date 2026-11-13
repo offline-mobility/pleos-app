@@ -21,8 +21,10 @@ android {
 
         // Rescue server base URL (docs/GATEWAY_API.md). Blank = online features off.
         // Must be https:// (debug builds also accept http://10.0.2.2 for a local server).
-        // Set per build with -PserverUrl=https://...
-        buildConfigField("String", "SERVER_URL", "\"${project.findProperty("serverUrl") ?: ""}\"")
+        // Rescue server address, set per build with -PserverUrl=https://... (empty: online features off).
+        // A string resource, not a BuildConfig constant: Kotlin inlines Java constants at compile
+        // time, so an incremental build could keep the address of the previous build.
+        resValue("string", "server_url", (project.findProperty("serverUrl") ?: "").toString())
     }
 
     // Release signing key stays on the developer machine (keystore.properties and *.jks are git-ignored).

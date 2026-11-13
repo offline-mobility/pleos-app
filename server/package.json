@@ -3,9 +3,12 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "node dev.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "update-civil-shelters": "node scripts/update-civil-shelters.mjs"
   }
 }

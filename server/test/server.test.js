@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { classify, regionMatches, sidoKey } from '../src/alerts.js';
+import { classify, regionMatches, relevance, sidoKey } from '../src/alerts.js';
+import { CIVIL_SNAPSHOT, civilSheltersNear } from '../src/civil.js';
+import { getShelters, SHELTER_LIMITS, shelterGroup } from '../src/shelters.js';
 import { handle } from '../src/app.js';
 import { MemoryStore } from '../src/store.js';
-import { kstDate, mapAlert, mapShelter, parseKst } from '../src/upstream.js';
+import { kstDate, mapAlert, mapCivilShelter, mapShelter, parseKst } from '../src/upstream.js';
 import { parseRelayLink, relaySummary } from '../public/relay.js';
 
 const NOW = 1_794_000_000_000;
@@ -11,7 +13,8 @@ const REPORTER_A = '123e4567-e89b-12d3-a456-426614174000';
 const REPORTER_B = '223e4567-e89b-12d3-a456-426614174000';
 
 function deps(env = {}) {
-  return { store: new MemoryStore(() => NOW), env, now: NOW, fetchFn: async () => { throw new Error('no network in tests'); } };
+  // The bundled civil defence snapshot is switched off unless a test asks for it.
+  return { store: new MemoryStore(() => NOW), env, now: NOW, fetchFn: async () => { throw new Error('no network in tests'); }, civilNear: () => [] };
 }
 
 const call = (d, method, path, { query = {}, body, headers = {}, ip = '1.1.1.1' } = {}) =>
@@ -195,4 +198,67 @@ test('a tampered relay link is rejected as a whole', () => {
   ]) {
     assert.equal(parseRelayLink(`?${bad}`), null, bad);
   }
+});
+
+test('messages that are not about a disaster in progress are left out', () => {
+  // Real messages from 2026-11 (재난안전데이터공유플랫폼).
+  const m = (category, text, level = '안전안내') => relevance({ category, text, level });
+  assert.deepEqual(m('산불', '오늘 09:27 재산면 갈산리 2366에서 산불 발생. 입산 및 산불 현장 주변 접근 금지.'), { show: true, type: 'WILDFIRE' });
+  assert.deepEqual(m('산불', '산불 예방은 시민 여러분의 관심과 실천에서 시작됩니다. 영농부산물·쓰레기 소각 금지 등 산불 예방 수칙을 꼭 지켜주세요.'), { show: false, type: null });
+  assert.deepEqual(m('한파', '오늘(6일) 21시부터 한파주의보 발효. 외출 시 보온에 유의하고 수도계량기 동파에 대비해 주시기 바랍니다.'), { show: true, type: 'SNOW_COLD' });
+  assert.deepEqual(m('한파', '한파주의보가 해제되었습니다. 빙판길 안전에 유의하세요.'), { show: false, type: null });
+  assert.deepEqual(m('산불', '오늘 09:27 재산면 갈산리 산582-1 인근에서 발생한 산불 주불 진화 완료. 현재 잔불 정리 중'), { show: false, type: null });
+  assert.deepEqual(m('화재', '화재 진압은 완료하였으나 연기 등 흡입 우려가 있으므로 당분간 창문 등을 닫아주시기 바랍니다.'), { show: true, type: null });
+  assert.deepEqual(m('강풍', '우리 지역 강풍주의보 발효 ▲영농부산물 소각 금지(산불 예방) ▲해안가 접근 금지'), { show: true, type: 'TYPHOON' });
+  assert.deepEqual(m('환경오염사고', '오늘 20:15 경 고잔동 689-2, 유독가스 유출. 인근 주민은 젖은 물수건 등으로 코와 입을 막고 미리 대피하세요.'), { show: true, type: 'CHEMICAL' });
+  assert.deepEqual(m('화재', '오늘 08:49경 장안면 석포리에서 화재가 발생하여 연기가 다량 발생 중. 창문을 닫는 등 안전에 유의하여 주시기 바랍니다.'), { show: true, type: null });
+  assert.deepEqual(m('안개', '오늘 짙은 안개 발생으로 시야 확보가 어렵습니다.'), { show: true, type: null });
+  assert.deepEqual(m('기타', '담양읍 오계리에서 실종된 정00(여/66세)을 찾습니다.'), { show: false, type: null });
+  assert.deepEqual(m('수도', '노후상수관망 정비사업 밸브차단 작업으로 단수 예정이오니 사전대비 바랍니다.'), { show: false, type: null });
+  assert.deepEqual(m('교통사고', '3호선 지산~범물역간 차량고장으로 전구간 열차지연 발생중'), { show: false, type: null });
+  // An urgent-level message is always shown.
+  assert.equal(m('기타', '즉시 대피하십시오.', '긴급재난').show, true);
+});
+
+test('the merged 전남광주 region matches both of its former names', () => {
+  assert.equal(sidoKey('전남광주통합특별시'), sidoKey('광주광역시'));
+  assert.equal(sidoKey('전남광주통합특별시'), sidoKey('전라남도'));
+  assert.equal(regionMatches('전남광주통합특별시 담양군 ', '전라남도', '담양군'), true);
+  assert.equal(regionMatches('경기도 부천시 원미구 ,경기도 부천시 소사구 ', '경기도', '부천시'), true);
+  assert.equal(regionMatches('전남광주통합특별시 담양군 ', '경기도', '광주시'), false);
+});
+
+test('civil defence shelter rows are validated and capacity follows floor area', () => {
+  const row = { GID: '40028265', SHLT_NM: " 전하I'PARK 101~109동 ", LAT: 35.509725, LOT: 129.423678, FCAR: 36785, ROAD_NM_ADDR: '울산광역시 동구  봉수로 270', DADDR: '울산광역시 동구 전하동 640번지 1호' };
+  assert.deepEqual(mapCivilShelter(row), ['40028265', "전하I'PARK 101~109동", 35.50973, 129.42368, 36785, '울산광역시 동구 봉수로 270']);
+  assert.equal(mapCivilShelter({ ...row, LAT: 0 }), null);
+  assert.equal(mapCivilShelter({ ...row, SHLT_NM: '' }), null);
+
+  const near = civilSheltersNear(35.51, 129.42, 2, [mapCivilShelter(row), mapCivilShelter({ ...row, GID: 'x', LAT: 37.5, LOT: 127.0 })]);
+  assert.equal(near.length, 1);
+  assert.deepEqual([near[0].kind, near[0].sido, near[0].sigungu, near[0].capacity], ['민방위대피소', '울산광역시', '동구', 44587]);
+});
+
+test('the bundled snapshot covers the country', () => {
+  assert.ok(CIVIL_SNAPSHOT.count > 15_000);
+  assert.match(CIVIL_SNAPSHOT.generatedAt, /^\d{4}-\d{2}-\d{2}$/);
+  for (const [lat, lon] of [[37.4979, 127.0276], [35.1796, 129.0756], [35.1595, 126.8526], [33.4996, 126.5312]]) {
+    assert.ok(civilSheltersNear(lat, lon, 2).length > 0, `${lat},${lon}`);
+  }
+});
+
+test('each kind of shelter keeps its own nearest ones', async () => {
+  const at = (i) => ({ lat: 37.5 + i * 0.0001, lon: 127.0 });
+  const rest = Array.from({ length: 200 }, (_, i) => ({ id: `r${i}`, name: `쉼터 ${i}`, kind: '무더위쉼터', sido: '서울특별시', sigungu: '강남구', address: '', capacity: null, ...at(i) }));
+  const quake = [{ id: 'q', name: '운동장', kind: '지진옥외대피장소', sido: '서울특별시', sigungu: '강남구', address: '', capacity: null, ...at(250) }];
+  const civil = [{ id: 'c', name: '지하주차장', kind: '민방위대피소', sido: '서울특별시', sigungu: '강남구', address: '', capacity: 1200, ...at(260) }];
+  const base = { ...deps({ SAFETYDATA_SHELTER_KEY: 'k' }), upstream: async () => [...rest, ...quake], civilNear: () => civil };
+  const r = await getShelters(base, 37.5, 127.0, 5);
+  assert.equal(r.source, 'live');
+  assert.equal(r.shelters.filter((s) => shelterGroup(s.kind) === 'rest').length, SHELTER_LIMITS.perGroup);
+  assert.deepEqual(r.shelters.slice(-2).map((s) => s.id), ['q', 'c']);
+
+  // Without an API key the snapshot alone still answers.
+  const offline = await getShelters({ ...deps(), civilNear: () => civil }, 37.5, 127.0, 5);
+  assert.deepEqual([offline.source, offline.shelters.length], ['snapshot', 1]);
 });

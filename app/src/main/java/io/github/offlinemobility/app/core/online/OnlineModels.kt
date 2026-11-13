@@ -121,10 +121,36 @@ object OnlineJson {
 }
 
 object ShelterFinder {
-    /** Nearest shelters with distance and bearing from the given point. */
-    fun nearest(shelters: List<Shelter>, latitude: Double, longitude: Double, limit: Int = 5): List<Pair<Shelter, Offset>> =
+    /**
+     * Word in [Shelter.kind] for the shelters meant for a disaster: an underground civil defence
+     * shelter in an air raid, an open assembly point after an earthquake, a staffed rest area in
+     * extreme cold or heat. Null when any shelter will do.
+     */
+    fun preferredKind(disaster: DisasterType): String? = when (disaster) {
+        DisasterType.AIR_RAID -> "민방위"
+        DisasterType.EARTHQUAKE -> "지진옥외"
+        DisasterType.SNOW_COLD -> "한파"
+        DisasterType.HEAT -> "무더위"
+        else -> null
+    }
+
+    /**
+     * Nearest shelters with distance and bearing from the given point. Shelters whose kind contains
+     * [preferKind] come first, however far, because the nearest shelter of the wrong kind can be the
+     * wrong place to go.
+     */
+    fun nearest(
+        shelters: List<Shelter>,
+        latitude: Double,
+        longitude: Double,
+        limit: Int = 5,
+        preferKind: String? = null,
+    ): List<Pair<Shelter, Offset>> =
         shelters
             .map { it to Geo.offset(latitude, longitude, it.latitude, it.longitude) }
-            .sortedBy { it.second.meters }
+            .sortedWith(
+                compareBy<Pair<Shelter, Offset>> { preferKind != null && !it.first.kind.contains(preferKind) }
+                    .thenBy { it.second.meters },
+            )
             .take(limit)
 }

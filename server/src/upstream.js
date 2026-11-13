@@ -1,21 +1,21 @@
 /**
  * Calls to 재난안전데이터공유플랫폼 (safetydata.go.kr, GET /V2/api/{id}).
  * Response: { header: { resultCode: "00", ... }, totalCount, body: [...] | null }.
- * Field names follow the official spec pages (dataSn=228, 1346); checked against a live call once
- * the service keys are issued.
+ * Field names were checked against live responses on 2026-11-13.
  */
 const BASE = 'https://www.safetydata.go.kr/V2/api';
 const ALERTS_ID = 'DSSP-IF-00247';
 const SHELTERS_ID = 'DSSP-IF-10941';
+const CIVIL_SHELTERS_ID = 'DSSP-IF-10166';
 const PAGE_SIZE = 1000;
 const MAX_PAGES = 3;
 const KST_OFFSET_MS = 9 * 3_600_000;
 
-async function fetchPages(id, key, params, fetchFn) {
+async function fetchPages(id, key, params, fetchFn, maxPages = MAX_PAGES) {
   const rows = [];
-  for (let page = 1; page <= MAX_PAGES; page++) {
+  for (let page = 1; page <= maxPages; page++) {
     const query = new URLSearchParams({ serviceKey: key, returnType: 'json', numOfRows: String(PAGE_SIZE), pageNo: String(page), ...params });
-    const res = await fetchFn(`${BASE}/${id}?${query}`, { signal: AbortSignal.timeout(8000) });
+    const res = await fetchFn(`${BASE}/${id}?${query}`, { signal: AbortSignal.timeout(maxPages > MAX_PAGES ? 30_000 : 8000) });
     if (!res.ok) throw new Error(`upstream http ${res.status}`);
     const data = await res.json();
     if (data?.header?.resultCode !== '00') throw new Error(`upstream code ${data?.header?.resultCode}`);
@@ -102,4 +102,30 @@ export async function fetchSheltersUpstream({ key, store, fetchFn, lat, lon, km 
   const shelters = rows.map(mapShelter).filter(Boolean);
   await store.set(cacheKey, JSON.stringify(shelters), 24 * 3600);
   return shelters;
+}
+
+/** Floor area per person for public civil defence shelters (공공용 대피시설 1인당 0.825㎡). */
+export const CIVIL_M2_PER_PERSON = 0.825;
+
+/**
+ * One 민방위대피소 row → compact snapshot row [id, name, lat, lon, areaM2, address], or null.
+ * Rows outside Korea or without a name are dropped.
+ */
+export function mapCivilShelter(row) {
+  const lat = Number(row.LAT);
+  const lon = Number(row.LOT);
+  const name = String(row.SHLT_NM ?? '').trim().slice(0, 60);
+  if (!name || !(lat >= 33 && lat <= 39) || !(lon >= 124 && lon <= 132)) return null;
+  const area = Number(row.FCAR);
+  const address = String(row.ROAD_NM_ADDR ?? row.DADDR ?? '').trim().replace(/\s+/g, ' ').slice(0, 80);
+  return [String(row.GID ?? row.SHNT_FCLT_SENU ?? `${lat},${lon}`), name, Number(lat.toFixed(5)), Number(lon.toFixed(5)), Number.isFinite(area) && area > 0 ? Math.round(area) : 0, address];
+}
+
+/**
+ * Every civil defence shelter in the country. The API has no area filter, so this is only used by
+ * scripts/update-civil-shelters.mjs to refresh the bundled snapshot, never while serving a request.
+ */
+export async function fetchCivilSheltersUpstream(key, fetchFn) {
+  const rows = await fetchPages(CIVIL_SHELTERS_ID, key, {}, fetchFn, 40);
+  return rows.map(mapCivilShelter).filter(Boolean);
 }

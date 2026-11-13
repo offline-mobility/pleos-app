@@ -24,6 +24,28 @@ const CATEGORY = {
   대설: 'SNOW_COLD', 한파: 'SNOW_COLD', 폭염: 'HEAT', 정전: 'BLACKOUT', 통신: 'BLACKOUT',
 };
 
+// Hazards a driver should hear about even though the app has no dedicated mode for them.
+const SHOWN_WITHOUT_MODE = new Set(['화재', '안개', '붕괴', '폭발', '가스', '테러', '비상사태', '화산폭발', '환경오염사고']);
+const URGENT_LEVELS = new Set(['긴급재난', '위급재난']);
+const HAPPENING = ['발생', '발효', '발령', '대피', '확산', '경보', '주의보', '통제', '유출', '누출'];
+
+/**
+ * Whether a message is shown in the car and which disaster mode it suggests. Checked against a
+ * week of real messages (2026-11): most are not about a disaster in progress — missing persons,
+ * water supply works, prevention campaigns filed under 산불, all-clear notices — and would bury
+ * the ones that matter.
+ */
+export function relevance(message) {
+  const text = String(message.text ?? '');
+  const urgent = URGENT_LEVELS.has(message.level ?? '');
+  const happening = HAPPENING.some((w) => text.includes(w));
+  const campaign = text.includes('예방') && !happening;
+  const allClear = /해제|진화 ?완료|복구 ?완료|조치 ?완료|정상 ?운행/.test(text) && !text.includes('발효') && !text.includes('발령');
+  const type = campaign || allClear ? null : classify(message.category, text);
+  const show = urgent || type !== null || (SHOWN_WITHOUT_MODE.has((message.category ?? '').trim()) && !campaign && !allClear);
+  return { show, type };
+}
+
 /** Returns the app DisasterType name, or null when no mode applies. */
 export function classify(category, text) {
   const c = (category ?? '').trim();
@@ -38,7 +60,8 @@ const SIDO_ALIASES = [
   ['충북', ['충청북도', '충북']],
   ['충남', ['충청남도', '충남']],
   ['전북', ['전라북도', '전북특별자치도', '전북']],
-  ['전남', ['전라남도', '전남']],
+  // 전남광주통합특별시: live data uses the merged name, older datasets the two former names.
+  ['전남', ['전남광주', '전라남도', '전남', '광주광역시']],
   ['경북', ['경상북도', '경북']],
   ['경남', ['경상남도', '경남']],
 ];
@@ -110,14 +133,16 @@ export async function getAlerts({ store, env, fetchFn, now, upstream }, region) 
   const alerts = raw
     .filter((m) => now - m.createdAt <= ALERT_MAX_AGE_MS)
     .filter((m) => region && regionMatches(m.regions, region.sido, region.sigungu))
-    .sort((a, b) => b.createdAt - a.createdAt)
+    .map((m) => ({ m, ...relevance(m) }))
+    .filter((x) => x.show)
+    .sort((a, b) => b.m.createdAt - a.m.createdAt)
     .slice(0, 20)
-    .map((m) => ({
+    .map(({ m, type }) => ({
       id: String(m.id),
       createdAt: m.createdAt,
       text: String(m.text).slice(0, 500),
       level: m.level ?? null,
-      type: classify(m.category, m.text),
+      type,
     }));
   return { source, alerts };
 }
