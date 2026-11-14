@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -77,7 +76,7 @@ internal fun RelaySheet(tx: TxState, onClose: () -> Unit) {
 @Composable
 private fun QrCode(text: String, size: Dp) {
     val matrix = remember(text) { runCatching { Encoder.encode(text, ErrorCorrectionLevel.M).matrix }.getOrNull() }
-    Canvas(Modifier.size(size).clip(RoundedCornerShape(12.dp)).background(Color.White)) {
+    Canvas(Modifier.size(size).background(Color.White)) {
         val m = matrix ?: return@Canvas
         val modules = m.width + 2 * QUIET_MODULES
         // Whole pixels per module keep the edges sharp for phone cameras.

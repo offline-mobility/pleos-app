@@ -27,6 +27,17 @@ class DisasterGuideTest {
     }
 
     @Test
+    fun firstScreenIsNineMessagesLedByTheSituationsOwn() {
+        for (guide in DisasterGuides.all) {
+            val first = guide.firstScreen
+            assertEquals(guide.type.name, 9, first.size)
+            assertEquals(guide.type.name, 9, first.distinct().size)
+            assertEquals(guide.type.name, guide.primary, first.take(5))
+            assertTrue(guide.type.name, RescueMessage.SOS !in first && RescueMessage.ACK !in first)
+        }
+    }
+
+    @Test
     fun everyGuideCitesAnOfficialKoreanSourceOverHttps() {
         for (guide in DisasterGuides.all) {
             assertTrue(guide.type.name, guide.sources.any { it.kind == SourceKind.KOREA_OFFICIAL })

@@ -55,13 +55,31 @@ data class DisasterGuide(
     val actions: List<Step>,
     val avoid: List<Step>,
     val carRisk: String?,
-    /** Five messages offered first on the main screen, in order. */
+    /** The five messages that matter most in this situation, in order. */
     val primary: List<RescueMessage>,
     val window: WindowAdvice,
     /** Switch on blackout (no exterior lights) when this mode is chosen. */
     val blackout: Boolean,
     val sources: List<Source>,
-)
+) {
+    /** The nine messages on the first screen: this situation's five, then the most common of the rest. */
+    val firstScreen: List<RescueMessage>
+        get() = (primary + FIRST_SCREEN_FILL).distinct().take(FIRST_SCREEN_SIZE)
+
+    companion object {
+        const val FIRST_SCREEN_SIZE = 9
+
+        /**
+         * Fill order after a situation's own messages: people in danger, then needs, then road news.
+         * The generic SOS is left to the "다른 상황" list: it says less than any specific message.
+         */
+        val FIRST_SCREEN_FILL = listOf(
+            MEDICAL, TRAPPED, FIRE, FLOOD, COLD, WATER, VULNERABLE, POWER, MEDICINE, FOOD,
+            RescueMessage.HAZARD, COLLAPSE, RescueMessage.CBRN, ROAD_BLOCKED, SHELTER, ROUTE_CLEAR,
+            RescueMessage.RESCUE_TEAM, RescueMessage.ALL_SAFE,
+        )
+    }
+}
 
 /**
  * Offline in-car guidance per disaster. Wording follows Korean official guidance (행정안전부

@@ -34,42 +34,48 @@ data class AppColors(
     val onStrong: Color,
 )
 
+/*
+ * Follows the Pleos Connect system screens (settings, app drawer): white and black, square corners,
+ * thin grey outlines, black fill for what is selected or primary. The only colour is red, kept for
+ * danger and warnings (urgent requests received, lost connection, low energy, "하지 마세요").
+ * accent / safe / help-soft tokens stay as names so call sites read by meaning, but map to greys.
+ */
 private val Light = AppColors(
-    page = Color(0xFFF7F8FA),
+    page = Color(0xFFFFFFFF),
     canvas = Color(0xFFFFFFFF),
-    surface = Color(0xFFF1F3F5),
-    line = Color(0xFFE3E6EB),
-    ink = Color(0xFF17191E),
-    body = Color(0xFF474C55),
-    mute = Color(0xFF8B919C),
-    accent = Color(0xFF2B5CE6),
-    accentSoft = Color(0xFFEBF0FD),
-    urgent = Color(0xFFE5484D),
-    urgentSoft = Color(0xFFFDECEC),
-    help = Color(0xFFE8890C),
-    helpSoft = Color(0xFFFDF1E1),
-    safe = Color(0xFF2F9A6A),
-    safeSoft = Color(0xFFE7F4ED),
+    surface = Color(0xFFF2F2F2),
+    line = Color(0xFFC8C8C8),
+    ink = Color(0xFF000000),
+    body = Color(0xFF424242),
+    mute = Color(0xFF767676),
+    accent = Color(0xFF000000),
+    accentSoft = Color(0xFFF2F2F2),
+    urgent = Color(0xFFD7282F),
+    urgentSoft = Color(0xFFF2F2F2),
+    help = Color(0xFFD7282F),
+    helpSoft = Color(0xFFF2F2F2),
+    safe = Color(0xFF000000),
+    safeSoft = Color(0xFFF2F2F2),
     onStrong = Color(0xFFFFFFFF),
 )
 
 private val Dark = AppColors(
-    page = Color(0xFF111317),
-    canvas = Color(0xFF1B1E24),
-    surface = Color(0xFF252931),
-    line = Color(0xFF323741),
-    ink = Color(0xFFF2F4F7),
-    body = Color(0xFFC9CED6),
-    mute = Color(0xFF8B919C),
-    accent = Color(0xFF5B83F0),
-    accentSoft = Color(0xFF1E2A4A),
-    urgent = Color(0xFFF2555A),
-    urgentSoft = Color(0xFF3A1F22),
-    help = Color(0xFFF09A2A),
-    helpSoft = Color(0xFF3A2A16),
-    safe = Color(0xFF3DB07D),
-    safeSoft = Color(0xFF1A3228),
-    onStrong = Color(0xFFFFFFFF),
+    page = Color(0xFF000000),
+    canvas = Color(0xFF000000),
+    surface = Color(0xFF1C1C1C),
+    line = Color(0xFF4A4A4A),
+    ink = Color(0xFFFFFFFF),
+    body = Color(0xFFD0D0D0),
+    mute = Color(0xFF9E9E9E),
+    accent = Color(0xFFFFFFFF),
+    accentSoft = Color(0xFF1C1C1C),
+    urgent = Color(0xFFFF5A5F),
+    urgentSoft = Color(0xFF1C1C1C),
+    help = Color(0xFFFF5A5F),
+    helpSoft = Color(0xFF1C1C1C),
+    safe = Color(0xFFFFFFFF),
+    safeSoft = Color(0xFF1C1C1C),
+    onStrong = Color(0xFF000000),
 )
 
 val LocalAppColors = staticCompositionLocalOf { Light }
@@ -96,7 +102,8 @@ object Size {
     val secondaryButton = 72.dp
     val tile = 132.dp
     val sosTile = 168.dp
-    val radius = 16.dp
+    /** Square corners, as on the Pleos system screens. */
+    val radius = 0.dp
     val gap = 16.dp
 }
 

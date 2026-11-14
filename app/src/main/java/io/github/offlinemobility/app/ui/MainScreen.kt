@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Highlight
@@ -185,7 +186,7 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
                     },
                 )
             }
-            Overlay.MORE -> MoreSheet(state.guide.primary, onPick = pick, onClose = { overlay = Overlay.NONE })
+            Overlay.MORE -> MoreSheet(state.guide.firstScreen, onPick = pick, onClose = { overlay = Overlay.NONE })
             Overlay.DISASTER -> DisasterSheet(
                 current = state.disaster,
                 onPick = {
@@ -214,23 +215,19 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
 @Composable
 private fun Header(state: UiState, onShelters: () -> Unit, onDisaster: () -> Unit, onSettings: () -> Unit) {
     val c = LocalAppColors.current
-    val (dot, text) = when {
-        state.vehicleMode == VehicleMode.CONNECTING -> c.mute to "차량에 연결하는 중"
-        state.gear == GearState.PARK -> c.safe to "정차 중 · 신호를 보낼 수 있어요"
-        state.gear == GearState.UNKNOWN -> c.help to "차 상태를 확인하고 있어요"
-        else -> c.help to "주행 중 · 차를 세우고 P단에서 보낼 수 있어요"
+    val text = when {
+        state.vehicleMode == VehicleMode.CONNECTING -> "차량에 연결하는 중"
+        state.gear == GearState.PARK -> "정차 중 · 신호를 보낼 수 있어요"
+        state.gear == GearState.UNKNOWN -> "차 상태를 확인하고 있어요"
+        else -> "주행 중 · 차를 세우고 P단에서 보낼 수 있어요"
     }
     Row(Modifier.fillMaxWidth().heightIn(min = Size.secondaryButton), verticalAlignment = Alignment.CenterVertically) {
         // Left: everything about the current state. Right: only things to press, all the same size.
         Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(18.dp).clip(CircleShape).background(dot))
-                Spacer(Modifier.width(14.dp))
-                Text(text, fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
+            Text(text, fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
             val status = statusLine(state, c)
             if (status.isNotEmpty()) {
-                Text(status, fontSize = Type.meta, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 32.dp))
+                Text(status, fontSize = Type.meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         Spacer(Modifier.width(16.dp))
@@ -258,12 +255,12 @@ private fun statusLine(state: UiState, c: AppColors): AnnotatedString = buildAnn
     }
     if (state.vehicleMode == VehicleMode.SIMULATION) item("연습 모드", c.body)
     if (state.gateway.enabled) {
-        if (state.gateway.online) item("통신 연결됨", c.safe) else item("통신 끊김 · 소리와 빛으로 보내요", c.help)
+        if (state.gateway.online) item("통신 연결됨", c.body, strong = false) else item("통신 끊김 · 소리와 빛으로 보내요", c.urgent)
     }
-    if (state.blackout) item("등화관제 중", c.help)
+    if (state.blackout) item("등화관제 중", c.ink)
     // Only what the car reports. Hours are estimates and appear where they help a decision (난방 아끼기 줄).
     state.endurance?.let { e ->
-        item("${if (e.isEv) "배터리" else "연료"} ${e.percent}%", if (e.low) c.help else c.mute, strong = e.low)
+        item("${if (e.isEv) "배터리" else "연료"} ${e.percent}%", if (e.low) c.urgent else c.body, strong = e.low)
     }
 }
 
@@ -327,7 +324,7 @@ private fun SendArea(
                 }
                 Spacer(Modifier.height(Size.gap))
             }
-            MessagePicker(state.guide.primary, enabled = state.safety.allowed, onPick = onPick, onMore = onMore, modifier = Modifier.weight(1f))
+            MessagePicker(state.guide.firstScreen, enabled = state.safety.allowed, onPick = onPick, onMore = onMore, modifier = Modifier.weight(1f))
             if (!state.safety.allowed) {
                 Spacer(Modifier.height(Size.gap))
                 Banner(
@@ -346,9 +343,13 @@ private fun SendArea(
     }
 }
 
+/**
+ * Nine messages in a 3×3 grid, then one list row to the rest. Every message sends the same way, so
+ * none gets a bigger tile; the row is not a tenth tile because it opens a list instead of sending.
+ */
 @Composable
 private fun MessagePicker(
-    primary: List<RescueMessage>,
+    messages: List<RescueMessage>,
     enabled: Boolean,
     onPick: (RescueMessage) -> Unit,
     onMore: () -> Unit,
@@ -356,71 +357,42 @@ private fun MessagePicker(
 ) {
     val c = LocalAppColors.current
     Column(modifier.alpha(if (enabled) 1f else 0.4f), verticalArrangement = Arrangement.spacedBy(Size.gap)) {
-        val sos = RescueMessage.SOS.copy
-        Row(
-            Modifier.fillMaxWidth().weight(1.25f).heightIn(min = Size.sosTile)
-                .clip(RoundedCornerShape(Size.radius)).background(c.urgent)
-                .clickable(enabled = enabled) { onPick(RescueMessage.SOS) }
-                .padding(horizontal = 32.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(sos.icon, contentDescription = null, tint = c.onStrong, modifier = Modifier.size(104.dp))
-            Spacer(Modifier.width(28.dp))
-            Column {
-                Text(sos.title, fontSize = Type.hero, fontWeight = FontWeight.ExtraBold, color = c.onStrong)
-                Text(sos.detail, fontSize = Type.title, color = c.onStrong.copy(alpha = 0.92f))
+        messages.chunked(GRID_COLUMNS).forEach { row ->
+            Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
+                row.forEach { MessageTile(it, enabled, onPick, Modifier.weight(1f).fillMaxHeight()) }
+                repeat(GRID_COLUMNS - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
-        val rows = primary.chunked(3)
-        Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
-            rows[0].forEach { MessageTile(it, enabled, onPick, Modifier.weight(1f).fillMaxHeight()) }
-        }
-        Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
-            rows[1].forEach { MessageTile(it, enabled, onPick, Modifier.weight(1f).fillMaxHeight()) }
-            Tile(
-                icon = Icons.Filled.Apps,
-                iconTint = c.body,
-                title = "다른 메시지",
-                detail = "${moreGroups(primary).sumOf { it.second.size }}가지 더 보기",
-                enabled = enabled,
-                onClick = onMore,
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-            )
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 88.dp).background(c.canvas).border(1.dp, c.line)
+                .clickable(enabled = enabled, onClick = onMore).padding(horizontal = 24.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Apps, contentDescription = null, tint = c.ink, modifier = Modifier.size(36.dp))
+            Spacer(Modifier.width(16.dp))
+            Text("다른 상황", fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.ink, modifier = Modifier.weight(1f))
+            Text("${moreGroups(messages).sumOf { it.second.size }}가지", fontSize = Type.body, color = c.mute)
+            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = c.mute, modifier = Modifier.size(40.dp))
         }
     }
 }
 
-@Composable
-private fun MessageTile(message: RescueMessage, enabled: Boolean, onPick: (RescueMessage) -> Unit, modifier: Modifier) {
-    val copy = message.copy
-    Tile(copy.icon, copy.tone.strong(), copy.title, copy.detail, enabled, { onPick(message) }, modifier)
-}
+private const val GRID_COLUMNS = 3
 
 @Composable
-private fun Tile(
-    icon: ImageVector,
-    iconTint: Color,
-    title: String,
-    detail: String,
-    enabled: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier,
-) {
+private fun MessageTile(message: RescueMessage, enabled: Boolean, onPick: (RescueMessage) -> Unit, modifier: Modifier) {
     val c = LocalAppColors.current
+    val copy = message.copy
     Column(
-        modifier.heightIn(min = Size.tile).clip(RoundedCornerShape(Size.radius)).background(c.canvas)
-            .border(1.dp, c.line, RoundedCornerShape(Size.radius))
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 18.dp),
+        modifier.heightIn(min = Size.tile).background(c.canvas).border(1.dp, c.line)
+            .clickable(enabled = enabled) { onPick(message) }
+            .padding(16.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(60.dp))
-        Spacer(Modifier.height(12.dp))
-        Text(title, fontSize = Type.tileTitle, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Spacer(Modifier.height(2.dp))
-        Text(detail, fontSize = Type.meta, color = c.mute, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Icon(copy.icon, contentDescription = null, tint = c.ink, modifier = Modifier.size(76.dp))
+        Spacer(Modifier.height(18.dp))
+        Text(copy.title, fontSize = Type.tileTitle, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -439,14 +411,9 @@ private fun SendingPanel(state: UiState, actions: ScreenActions, onRelay: () -> 
         message == RescueMessage.SOS -> "도움 요청을 보내고 있어요"
         else -> "‘${copy.title}’ 보내는 중"
     }
-    Column(
-        modifier.clip(RoundedCornerShape(Size.radius)).background(c.canvas)
-            .border(1.dp, c.line, RoundedCornerShape(Size.radius)).padding(28.dp),
-    ) {
+    Column(modifier.background(c.canvas).border(1.dp, c.line).padding(28.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(72.dp).clip(CircleShape).background(copy.tone.soft()), contentAlignment = Alignment.Center) {
-                Icon(copy.icon, contentDescription = null, tint = copy.tone.strong(), modifier = Modifier.size(44.dp))
-            }
+            Icon(copy.icon, contentDescription = null, tint = c.ink, modifier = Modifier.size(64.dp))
             Spacer(Modifier.width(20.dp))
             Column {
                 Text(title, fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink)
@@ -537,20 +504,20 @@ private fun SendingPanel(state: UiState, actions: ScreenActions, onRelay: () -> 
 private fun ProgressRow(icon: ImageVector, text: String, done: Boolean, active: Boolean, lampOn: Boolean? = null) {
     val c = LocalAppColors.current
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 84.dp).clip(RoundedCornerShape(Size.radius)).background(c.surface)
-            .padding(horizontal = 20.dp),
+        Modifier.fillMaxWidth().heightIn(min = 84.dp).background(c.surface).padding(horizontal = 20.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = null, tint = if (active) c.accent else c.body, modifier = Modifier.size(40.dp))
+        Icon(icon, contentDescription = null, tint = if (active) c.ink else c.body, modifier = Modifier.size(40.dp))
         Spacer(Modifier.width(16.dp))
         Text(text, fontSize = Type.body, fontWeight = FontWeight.SemiBold, color = c.ink, modifier = Modifier.weight(1f))
         when {
+            // Mirrors the lamp: filled while it is on.
             lampOn != null -> Box(
                 Modifier.size(28.dp).clip(CircleShape)
-                    .background(if (lampOn) c.help else Color.Transparent)
-                    .border(2.dp, c.help, CircleShape),
+                    .background(if (lampOn) c.ink else Color.Transparent)
+                    .border(2.dp, c.ink, CircleShape),
             )
-            done -> Icon(Icons.Filled.Check, contentDescription = "완료", tint = c.safe, modifier = Modifier.size(36.dp))
+            done -> Icon(Icons.Filled.Check, contentDescription = "완료", tint = c.ink, modifier = Modifier.size(36.dp))
         }
     }
 }
@@ -592,14 +559,26 @@ private fun InboxArea(state: UiState, actions: ScreenActions, now: Long, modifie
     Column(
         modifier.clip(RoundedCornerShape(Size.radius)).background(c.surface).padding(20.dp),
     ) {
+        // Listening is a state, not something people change here: plain words, switched in 설정.
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("주변에서 온 신호", fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.ink)
             if (items.isNotEmpty()) {
                 Spacer(Modifier.width(10.dp))
-                Text("${items.size}", fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.accent)
+                Text("${items.size}", fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.ink)
             }
             Spacer(Modifier.weight(1f))
-            ListenToggle(state.listening, actions.toggleListen)
+            Icon(
+                if (state.listening) Icons.Filled.Mic else Icons.Filled.MicOff,
+                contentDescription = null,
+                tint = if (state.listening) c.mute else c.urgent,
+                modifier = Modifier.size(28.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                if (state.listening) "듣는 중" else "듣기 꺼짐",
+                fontSize = Type.meta,
+                color = if (state.listening) c.mute else c.urgent,
+            )
         }
         state.micMessage?.let {
             Spacer(Modifier.height(10.dp))
@@ -617,7 +596,7 @@ private fun InboxArea(state: UiState, actions: ScreenActions, now: Long, modifie
                 Text("아직 받은 신호가 없어요", fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.body)
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    if (!state.listening) "듣기가 꺼져 있어요 · 위의 버튼을 눌러 켜 주세요"
+                    if (!state.listening) "듣기가 꺼져 있어요 · 설정에서 켤 수 있어요"
                     else when (state.guide.window) {
                         WindowAdvice.OPEN_A_LITTLE -> "주변 차량의 신호를 듣고 있어요\n창문을 조금 열면 더 멀리서도 들려요"
                         WindowAdvice.KEEP_CLOSED -> "주변 차량의 신호를 듣고 있어요\n지금은 창문을 닫아 두세요 · 들리는 거리는 줄어요"
@@ -639,39 +618,17 @@ private fun InboxArea(state: UiState, actions: ScreenActions, now: Long, modifie
 }
 
 @Composable
-private fun ListenToggle(listening: Boolean, onClick: () -> Unit) {
-    val c = LocalAppColors.current
-    Row(
-        Modifier.heightIn(min = 60.dp).clip(RoundedCornerShape(30.dp))
-            .background(if (listening) c.safeSoft else c.canvas)
-            .border(1.dp, if (listening) c.safe else c.line, RoundedCornerShape(30.dp))
-            .clickable(onClick = onClick).padding(horizontal = 18.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(if (listening) Icons.Filled.Mic else Icons.Filled.MicOff, contentDescription = null, tint = if (listening) c.safe else c.mute, modifier = Modifier.size(28.dp))
-        Spacer(Modifier.width(8.dp))
-        Text(if (listening) "듣는 중" else "듣기 꺼짐", fontSize = Type.meta, fontWeight = FontWeight.SemiBold, color = if (listening) c.safe else c.body)
-    }
-}
-
-@Composable
 private fun InboxCard(item: InboxItem, now: Long, myFix: Fix?, canReply: Boolean, onReply: () -> Unit) {
     val c = LocalAppColors.current
     val copy = item.frame.message.copy
-    val urgent = copy.tone == Tone.URGENT
     val fromServer = item.kind == InboxKind.SERVER
-    val shape = RoundedCornerShape(Size.radius)
     // Reading order for someone deciding whether to go and help: what and how many, where, then how it got here.
+    // The only colour is the red icon of an urgent request, so those stand out in the list.
     Row(
-        Modifier.fillMaxWidth().clip(shape)
-            .background(if (urgent) c.urgentSoft else c.canvas)
-            .border(1.dp, if (urgent) c.urgent.copy(alpha = 0.35f) else c.line, shape)
-            .padding(20.dp),
+        Modifier.fillMaxWidth().background(c.canvas).border(1.dp, c.line).padding(20.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        Box(Modifier.size(64.dp).clip(CircleShape).background(if (urgent) c.canvas else copy.tone.soft()), contentAlignment = Alignment.Center) {
-            Icon(copy.icon, contentDescription = null, tint = copy.tone.strong(), modifier = Modifier.size(38.dp))
-        }
+        Icon(copy.icon, contentDescription = null, tint = copy.tone.strong(), modifier = Modifier.size(44.dp))
         Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.Top) {
@@ -715,9 +672,9 @@ private fun InboxCard(item: InboxItem, now: Long, myFix: Fix?, canReply: Boolean
                 Spacer(Modifier.height(14.dp))
                 if (item.acknowledged) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.Check, contentDescription = null, tint = c.safe, modifier = Modifier.size(28.dp))
+                        Icon(Icons.Filled.Check, contentDescription = null, tint = c.ink, modifier = Modifier.size(28.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("응답했어요", fontSize = Type.meta, fontWeight = FontWeight.SemiBold, color = c.safe)
+                        Text("응답했어요", fontSize = Type.meta, fontWeight = FontWeight.SemiBold, color = c.ink)
                     }
                 } else {
                     AppButton("받았다고 알리기", onReply, Kind.SECONDARY, Modifier.fillMaxWidth(), height = 64.dp, enabled = canReply)
@@ -742,7 +699,7 @@ internal fun SheetScrim(onDismiss: () -> Unit, content: @Composable () -> Unit) 
 internal fun Sheet(width: Dp = 820.dp, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalAppColors.current
     Column(
-        Modifier.widthIn(max = width).fillMaxWidth(0.92f).then(modifier).clip(RoundedCornerShape(24.dp)).background(c.canvas)
+        Modifier.widthIn(max = width).fillMaxWidth(0.92f).then(modifier).background(c.canvas)
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
             .padding(32.dp),
         content = content,
@@ -763,14 +720,9 @@ private fun ConfirmSheet(
     SheetScrim(onCancel) {
         Sheet {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(84.dp).clip(CircleShape).background(copy.tone.soft()), contentAlignment = Alignment.Center) {
-                    Icon(copy.icon, contentDescription = null, tint = copy.tone.strong(), modifier = Modifier.size(52.dp))
-                }
-                Spacer(Modifier.width(22.dp))
-                Column {
-                    Text(copy.title, fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink)
-                    Text(copy.detail, fontSize = Type.body, color = c.body)
-                }
+                Icon(copy.icon, contentDescription = null, tint = c.ink, modifier = Modifier.size(56.dp))
+                Spacer(Modifier.width(20.dp))
+                Text(copy.title, fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink)
             }
             Spacer(Modifier.height(28.dp))
             Divider()
@@ -793,12 +745,7 @@ private fun ConfirmSheet(
                     modifier = Modifier.weight(1f),
                 )
                 if (state.locationPermission) {
-                    Switch(
-                        checked = state.shareLocation,
-                        onCheckedChange = { onToggleLocation() },
-                        modifier = Modifier.scale(1.4f).padding(end = 12.dp),
-                        colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
-                    )
+                    AppSwitch(state.shareLocation, onToggleLocation)
                 }
             }
             Divider()
@@ -811,43 +758,68 @@ private fun ConfirmSheet(
     }
 }
 
+/** One outlined box split into − | value | +, like the Pleos settings stepper. */
 @Composable
 internal fun Stepper(value: Int, onChange: (Int) -> Unit) {
     val c = LocalAppColors.current
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        RoundButton("−", enabled = value > 0) { onChange(-1) }
+    Row(Modifier.height(Size.secondaryButton).border(1.dp, c.line), verticalAlignment = Alignment.CenterVertically) {
+        StepKey("−", enabled = value > 0) { onChange(-1) }
+        Box(Modifier.width(1.dp).fillMaxHeight().background(c.line))
         Text(
             peopleText(value) ?: "모름",
-            fontSize = Type.display,
+            fontSize = Type.title,
             fontWeight = FontWeight.Bold,
             color = c.ink,
-            modifier = Modifier.widthIn(min = 150.dp),
+            modifier = Modifier.widthIn(min = 170.dp),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
-        RoundButton("+", enabled = value < 15) { onChange(1) }
+        Box(Modifier.width(1.dp).fillMaxHeight().background(c.line))
+        StepKey("+", enabled = value < 15) { onChange(1) }
     }
 }
 
 @Composable
-private fun RoundButton(text: String, enabled: Boolean, onClick: () -> Unit) {
+private fun StepKey(text: String, enabled: Boolean, onClick: () -> Unit) {
     val c = LocalAppColors.current
     Box(
-        Modifier.size(Size.secondaryButton).clip(CircleShape).background(c.surface)
-            .border(1.dp, c.line, CircleShape)
-            .clickable(enabled = enabled, onClick = onClick),
+        Modifier.size(Size.secondaryButton).clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Text(text, fontSize = Type.display, fontWeight = FontWeight.Bold, color = c.ink.copy(alpha = if (enabled) 1f else 0.4f)) }
+    ) { Text(text, fontSize = Type.display, color = if (enabled) c.ink else c.line) }
+}
+
+/**
+ * Pleos toggle: black track when on, grey when off, a full-size white thumb either way and no outline.
+ * An empty [Switch] thumbContent keeps the thumb full size when off (Material shrinks it otherwise).
+ */
+@Composable
+private fun AppSwitch(checked: Boolean, onToggle: () -> Unit, enabled: Boolean = true) {
+    val c = LocalAppColors.current
+    Switch(
+        checked = checked,
+        onCheckedChange = { onToggle() },
+        enabled = enabled,
+        thumbContent = {},
+        modifier = Modifier.scale(1.4f).padding(end = 12.dp),
+        colors = SwitchDefaults.colors(
+            checkedThumbColor = c.page,
+            checkedTrackColor = c.ink,
+            checkedBorderColor = Color.Transparent,
+            uncheckedThumbColor = c.page,
+            uncheckedTrackColor = c.mute,
+            uncheckedBorderColor = Color.Transparent,
+        ),
+    )
 }
 
 @Composable
-private fun MoreSheet(primary: List<RescueMessage>, onPick: (RescueMessage) -> Unit, onClose: () -> Unit) {
+private fun MoreSheet(firstScreen: List<RescueMessage>, onPick: (RescueMessage) -> Unit, onClose: () -> Unit) {
     val c = LocalAppColors.current
     SheetScrim(onClose) {
         Sheet(width = 1400.dp) {
-            Text("다른 메시지", fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink)
+            Text("다른 상황", fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink)
             Spacer(Modifier.height(12.dp))
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
-                moreGroups(primary).forEach { (group, messages) ->
+                moreGroups(firstScreen).forEach { (group, messages) ->
                     Text(group, fontSize = Type.meta, fontWeight = FontWeight.SemiBold, color = c.mute)
                     Spacer(Modifier.height(8.dp))
                     messages.chunked(3).forEach { row ->
@@ -865,23 +837,19 @@ private fun MoreSheet(primary: List<RescueMessage>, onPick: (RescueMessage) -> U
     }
 }
 
-/** Icon beside the text instead of above it: a third of the height of a first-screen tile. */
+/** Icon beside the name: the list fits on one screen without scrolling. */
 @Composable
 private fun CompactMessageTile(message: RescueMessage, onPick: (RescueMessage) -> Unit, modifier: Modifier) {
     val c = LocalAppColors.current
     val copy = message.copy
-    val shape = RoundedCornerShape(Size.radius)
     Row(
-        modifier.heightIn(min = 104.dp).clip(shape).background(c.canvas).border(1.dp, c.line, shape)
-            .clickable { onPick(message) }.padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier.heightIn(min = 96.dp).background(c.canvas).border(1.dp, c.line)
+            .clickable { onPick(message) }.padding(horizontal = 20.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(copy.icon, contentDescription = null, tint = copy.tone.strong(), modifier = Modifier.size(44.dp))
-        Spacer(Modifier.width(14.dp))
-        Column {
-            Text(copy.title, fontSize = Type.button, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(copy.detail.keepWords(), fontSize = Type.meta, color = c.mute, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
+        Icon(copy.icon, contentDescription = null, tint = c.ink, modifier = Modifier.size(44.dp))
+        Spacer(Modifier.width(16.dp))
+        Text(copy.title, fontSize = Type.button, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -905,11 +873,11 @@ private fun SettingsSheet(state: UiState, actions: ScreenActions, onClose: () ->
                 SwitchRow("불빛으로 알리기", "전조등을 국제 조난 신호 방식으로 깜빡여요.", state.useLight, actions.toggleLight, enabled = !state.blackout)
                 if (state.useLight && !state.blackout) {
                     InfoRow("깜빡일 위치") {
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Segment("앞", state.lampGroup == LampGroup.FRONT) { actions.lampGroup(LampGroup.FRONT) }
-                            Segment("뒤", state.lampGroup == LampGroup.REAR) { actions.lampGroup(LampGroup.REAR) }
-                            Segment("앞뒤", state.lampGroup == LampGroup.FRONT_AND_REAR) { actions.lampGroup(LampGroup.FRONT_AND_REAR) }
-                        }
+                        Segmented(
+                            listOf("앞" to LampGroup.FRONT, "뒤" to LampGroup.REAR, "앞뒤" to LampGroup.FRONT_AND_REAR),
+                            state.lampGroup,
+                            actions.lampGroup,
+                        )
                     }
                 }
                 SwitchRow(
@@ -927,6 +895,7 @@ private fun SettingsSheet(state: UiState, actions: ScreenActions, onClose: () ->
                     enabled = state.locationPermission,
                 )
                 SectionTitle("받은 신호")
+                SwitchRow("주변 신호 듣기", "마이크로 주변 차량의 신호음을 들어요. 끄면 신호를 받을 수 없어요.", state.listening, actions.toggleListen)
                 SwitchRow("다음 차량으로 이어서 전달", "받은 신호를 잠시 뒤 내 차에서도 다시 보내 더 멀리 퍼지게 해요.", state.autoRelay, actions.toggleRelay)
                 SwitchRow(
                     "받은 신호 음성으로 알려 주기",
@@ -1006,13 +975,7 @@ private fun SwitchRow(title: String, detail: String, checked: Boolean, onToggle:
             Text(detail.keepWords(), fontSize = Type.meta, color = c.mute)
         }
         Spacer(Modifier.width(20.dp))
-        Switch(
-            checked = checked,
-            onCheckedChange = { onToggle() },
-            enabled = enabled,
-            modifier = Modifier.scale(1.4f).padding(end = 12.dp),
-            colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
-        )
+        AppSwitch(checked, onToggle, enabled)
     }
 }
 
@@ -1025,16 +988,23 @@ internal fun InfoRow(label: String, content: @Composable RowScope.() -> Unit) {
     }
 }
 
+/** Options in one outlined box, the chosen one filled black, as in the Pleos settings. */
 @Composable
-private fun Segment(text: String, selected: Boolean, onClick: () -> Unit) {
+private fun <T> Segmented(options: List<Pair<String, T>>, selected: T, onSelect: (T) -> Unit) {
     val c = LocalAppColors.current
-    Box(
-        Modifier.heightIn(min = 64.dp).widthIn(min = 110.dp).clip(RoundedCornerShape(12.dp))
-            .background(if (selected) c.accent else c.surface)
-            .border(1.dp, if (selected) c.accent else c.line, RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick).padding(horizontal = 20.dp),
-        contentAlignment = Alignment.Center,
-    ) { Text(text, fontSize = Type.body, fontWeight = FontWeight.SemiBold, color = if (selected) c.onStrong else c.ink) }
+    Row(Modifier.height(64.dp).border(1.dp, c.line)) {
+        options.forEachIndexed { i, (label, value) ->
+            if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(c.line))
+            val on = value == selected
+            Box(
+                Modifier.widthIn(min = 120.dp).fillMaxHeight().background(if (on) c.ink else c.canvas)
+                    .clickable { onSelect(value) }.padding(horizontal = 24.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(label, fontSize = Type.body, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, color = if (on) c.page else c.ink)
+            }
+        }
+    }
 }
 
 @Composable
@@ -1072,17 +1042,17 @@ fun AppButton(
     fontSize: TextUnit = Type.button,
 ) {
     val c = LocalAppColors.current
-    // A disabled button is faded through its colours, not an alpha layer: a filled button keeps its
-    // label readable on a paler fill, an outlined one keeps its outline and pales the label.
-    val fade = if (enabled) 1f else 0.4f
-    val (bg, fg, border) = when (kind) {
-        Kind.TONE -> Triple(tone.strong().copy(alpha = fade), c.onStrong, null)
-        Kind.SECONDARY -> Triple(c.canvas, c.ink.copy(alpha = fade), BorderStroke(1.dp, c.line))
-        Kind.STRONG_NEUTRAL -> Triple(c.ink.copy(alpha = fade), c.page, null)
+    // Pleos buttons: filled black for the main action, outlined for the rest, whatever the message
+    // ([tone] is kept for call sites but no longer colours a button). Disabled is shown through the
+    // colours, not an alpha layer: grey fill and grey label, as the Pleos settings show it.
+    val (bg, fg, border) = when {
+        kind == Kind.SECONDARY -> Triple(c.canvas, if (enabled) c.ink else c.mute, BorderStroke(1.dp, c.line))
+        enabled -> Triple(c.ink, c.page, null)
+        else -> Triple(c.surface, c.mute, BorderStroke(1.dp, c.line))
     }
     Row(
-        modifier.heightIn(min = height).clip(RoundedCornerShape(Size.radius)).background(bg)
-            .let { if (border != null) it.border(border, RoundedCornerShape(Size.radius)) else it }
+        modifier.heightIn(min = height).background(bg)
+            .let { if (border != null) it.border(border) else it }
             .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 24.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
@@ -1123,8 +1093,8 @@ private fun DisasterSheet(current: DisasterType, onPick: (DisasterType) -> Unit,
     val c = LocalAppColors.current
     SheetScrim(onClose) {
         GuideFrame {
-            Text("지금 어떤 상황인가요?", fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink)
-            Text("고르면 그 상황의 행동요령을 보여 주고, 첫 화면 메시지도 상황에 맞게 바꿔요", fontSize = Type.body, color = c.body)
+            Text("어떤 재난인가요?", fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink)
+            Text("고르면 행동요령을 보여 주고, 첫 화면 메시지도 그 재난에 맞게 바꿔요", fontSize = Type.body, color = c.body)
             Spacer(Modifier.height(24.dp))
             Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Size.gap)) {
                 DisasterType.entries.chunked(SITUATION_COLUMNS).forEach { row ->
@@ -1132,16 +1102,16 @@ private fun DisasterSheet(current: DisasterType, onPick: (DisasterType) -> Unit,
                         row.forEach { type ->
                             val selected = type == current
                             Column(
-                                Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(Size.radius))
-                                    .background(if (selected) c.accentSoft else c.canvas)
-                                    .border(if (selected) 2.dp else 1.dp, if (selected) c.accent else c.line, RoundedCornerShape(Size.radius))
+                                Modifier.weight(1f).fillMaxHeight()
+                                    .background(if (selected) c.ink else c.canvas)
+                                    .border(1.dp, if (selected) c.ink else c.line)
                                     .clickable { onPick(type) }.padding(16.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.Center,
                             ) {
-                                Icon(type.icon, contentDescription = null, tint = if (selected) c.accent else c.body, modifier = Modifier.size(56.dp))
+                                Icon(type.icon, contentDescription = null, tint = if (selected) c.page else c.ink, modifier = Modifier.size(56.dp))
                                 Spacer(Modifier.height(12.dp))
-                                Text(type.label, fontSize = Type.body, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1)
+                                Text(type.label, fontSize = Type.body, fontWeight = FontWeight.Bold, color = if (selected) c.page else c.ink, maxLines = 1)
                             }
                         }
                         repeat(SITUATION_COLUMNS - row.size) { Spacer(Modifier.weight(1f)) }
@@ -1162,7 +1132,7 @@ private fun GuideSheet(guide: DisasterGuide, onBack: (() -> Unit)?, onClose: () 
     SheetScrim(onClose) {
         GuideFrame {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(guide.type.icon, contentDescription = null, tint = c.help, modifier = Modifier.size(52.dp))
+                Icon(guide.type.icon, contentDescription = null, tint = c.ink, modifier = Modifier.size(52.dp))
                 Spacer(Modifier.width(16.dp))
                 Text("${guide.type.label} 행동요령", fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink)
             }
@@ -1230,8 +1200,8 @@ private fun GuideSection(text: String) {
 internal fun GuideLine(mark: String, text: String, markColor: Color, large: Boolean = false) {
     val c = LocalAppColors.current
     Row(Modifier.fillMaxWidth().padding(vertical = if (large) 10.dp else 8.dp), verticalAlignment = Alignment.Top) {
-        Box(Modifier.size(if (large) 48.dp else 40.dp).clip(CircleShape).background(c.surface), contentAlignment = Alignment.Center) {
-            Text(mark, fontSize = if (large) Type.body else Type.meta, fontWeight = FontWeight.Bold, color = markColor)
+        Box(Modifier.width(if (large) 36.dp else 30.dp), contentAlignment = Alignment.TopCenter) {
+            Text(mark, fontSize = if (large) Type.title else Type.body, fontWeight = FontWeight.Bold, color = markColor)
         }
         Spacer(Modifier.width(if (large) 18.dp else 14.dp))
         val size = if (large) Type.title else Type.body
@@ -1252,8 +1222,7 @@ private fun AlertBanner(alert: OfficialAlert, current: DisasterType, onAccept: (
     val c = LocalAppColors.current
     val suggest = alert.type?.takeIf { it != current }
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(Size.radius)).background(c.urgentSoft)
-            .border(1.dp, c.urgent.copy(alpha = 0.35f), RoundedCornerShape(Size.radius)).padding(20.dp),
+        Modifier.fillMaxWidth().background(c.canvas).border(1.dp, c.line).padding(20.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Filled.Campaign, contentDescription = null, tint = c.urgent, modifier = Modifier.size(36.dp))
@@ -1292,7 +1261,7 @@ private fun ShelterSheet(state: UiState, now: Long, onClose: () -> Unit) {
             Spacer(Modifier.height(16.dp))
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
                 if (fix == null) {
-                    Text("내 위치를 아직 몰라 거리 대신 목록만 보여 드려요", fontSize = Type.body, color = c.help)
+                    Text("내 위치를 아직 몰라 거리 대신 목록만 보여 드려요", fontSize = Type.body, color = c.body)
                     Spacer(Modifier.height(8.dp))
                 }
                 val preferKind = ShelterFinder.preferredKind(state.disaster)
@@ -1304,9 +1273,7 @@ private fun ShelterSheet(state: UiState, now: Long, onClose: () -> Unit) {
                 }
                 rows.forEach { (shelter, offset) ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(60.dp).clip(CircleShape).background(c.safeSoft), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Filled.Home, contentDescription = null, tint = c.safe, modifier = Modifier.size(36.dp))
-                        }
+                        Icon(Icons.Filled.Home, contentDescription = null, tint = c.ink, modifier = Modifier.size(40.dp))
                         Spacer(Modifier.width(16.dp))
                         Column(Modifier.weight(1f)) {
                             Text(shelter.name, fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
