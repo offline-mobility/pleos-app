@@ -534,15 +534,16 @@ private fun lampWord(state: UiState): String {
     }
 }
 
-private fun methodText(state: UiState, message: RescueMessage): String {
-    val parts = buildList {
-        if (state.useSound) add("소리 3번")
-        if (state.lightUsable) add("${lampWord(state)} ${patternWord(LightPatterns.forMessage(message))}")
-    }
-    return when {
-        parts.isNotEmpty() -> parts.joinToString(" + ")
-        else -> "보낼 방법이 모두 꺼져 있어요 · 설정에서 켜 주세요"
-    }
+/**
+ * What pressing 보내기 makes the car do. The message itself travels inside the beeps (the receiving
+ * app reads it); the lamp only says how urgent it is, so this line is the same for most messages.
+ */
+private fun sendNote(state: UiState): String = when {
+    state.useSound && state.lightUsable -> "누르면 차가 알아서 신호음을 내고 ${lampWord(state)}을 깜빡여요"
+    state.useSound && state.blackout -> "누르면 차가 알아서 신호음을 내요 · 등화관제 중이라 불빛은 쓰지 않아요"
+    state.useSound -> "누르면 차가 알아서 신호음을 내요"
+    state.lightUsable -> "누르면 차가 알아서 ${lampWord(state)}을 깜빡여요 · 신호음이 꺼져 있어 다른 차 앱은 내용을 받지 못해요"
+    else -> "보낼 방법이 모두 꺼져 있어요 · 설정에서 켜 주세요"
 }
 
 // ---------------------------------------------------------------- inbox
@@ -735,10 +736,6 @@ private fun ConfirmSheet(
                 }
                 Divider()
             }
-            InfoRow("보내는 방법", minHeight = row, labelWidth = label) {
-                Text(methodText(state, message), fontSize = Type.body, fontWeight = FontWeight.SemiBold, color = c.ink)
-            }
-            Divider()
             InfoRow("내 위치", minHeight = row, labelWidth = label) {
                 Text(
                     locationText(state),
@@ -752,7 +749,11 @@ private fun ConfirmSheet(
                 }
             }
             Divider()
-            Spacer(Modifier.height(40.dp))
+            Spacer(Modifier.height(28.dp))
+            // Not a choice: says what the car is about to do on its own, so the beeps and flashes do not startle.
+            val canSend = state.useSound || state.lightUsable
+            Text(sendNote(state), fontSize = Type.body, color = if (canSend) c.body else c.urgent)
+            Spacer(Modifier.height(28.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
                 AppButton("취소", onCancel, Kind.SECONDARY, Modifier.weight(1f))
                 AppButton("보내기", onSend, Kind.TONE, Modifier.weight(1.6f), tone = copy.tone, enabled = state.canTransmit)
