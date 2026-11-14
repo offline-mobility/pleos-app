@@ -124,6 +124,13 @@ fun relativeTime(atMs: Long, nowMs: Long): String {
     }
 }
 
+/** "3분 전", "2시간 전", "1일 전". */
+fun ageWord(ms: Long): String = when {
+    ms < 3_600_000L -> "${(ms / 60_000L).coerceAtLeast(1)}분 전"
+    ms < 86_400_000L -> "${ms / 3_600_000L}시간 전"
+    else -> "${ms / 86_400_000L}일 전"
+}
+
 fun routeText(hop: Int): String = if (hop == 0) "가까운 차량" else "차량 ${hop}대를 거쳐 전달"
 
 /**

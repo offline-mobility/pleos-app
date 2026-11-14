@@ -29,6 +29,13 @@ class MainActivity : ComponentActivity() {
 
     private fun hasMic() = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
+    // Location permission may have been granted in the system settings while the app was away;
+    // the engine outlives this activity, so it has to be told to start GPS again.
+    override fun onResume() {
+        super.onResume()
+        engine.refreshLocation()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -68,6 +75,9 @@ class MainActivity : ComponentActivity() {
                         simulateIncoming = engine::simulateIncoming,
                         setGear = engine::setSimulatedGear,
                         retryVehicle = engine::connectVehicle,
+                        usePositionJump = engine::usePositionJump,
+                        keepPosition = engine::keepPosition,
+                        chooseArea = engine::chooseArea,
                     ),
                 )
             }

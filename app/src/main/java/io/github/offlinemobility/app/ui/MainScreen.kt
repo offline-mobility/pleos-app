@@ -82,6 +82,7 @@ import io.github.offlinemobility.app.core.disaster.DisasterGuide
 import io.github.offlinemobility.app.core.disaster.DisasterType
 import io.github.offlinemobility.app.core.disaster.WindowAdvice
 import io.github.offlinemobility.app.core.light.Lamp
+import io.github.offlinemobility.app.core.online.Area
 import io.github.offlinemobility.app.core.online.OfficialAlert
 import io.github.offlinemobility.app.core.online.Shelter
 import io.github.offlinemobility.app.core.online.ShelterFinder
@@ -120,9 +121,12 @@ class ScreenActions(
     val simulateIncoming: () -> Unit,
     val setGear: (GearState) -> Unit,
     val retryVehicle: () -> Unit,
+    val usePositionJump: () -> Unit,
+    val keepPosition: () -> Unit,
+    val chooseArea: (Area?) -> Unit,
 )
 
-private enum class Overlay { NONE, CONFIRM, MORE, SETTINGS, DISASTER, GUIDE, SHELTERS, KEEP_WARM, RELAY, INBOX, SHELTER, SIGNAL }
+private enum class Overlay { NONE, CONFIRM, MORE, SETTINGS, DISASTER, GUIDE, SHELTERS, KEEP_WARM, RELAY, INBOX, SHELTER, SIGNAL, AREA }
 
 /** A received signal pops up over the map only while it is this fresh. */
 private const val POPUP_WINDOW_MS = 10 * 60_000L
@@ -167,6 +171,8 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
         Box(modifier) {
             AroundMapPanel(
                 state,
+                now,
+                actions,
                 onShelter = {
                     shelterPick = it
                     overlay = Overlay.SHELTER
@@ -177,6 +183,7 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
                     overlay = Overlay.SIGNAL
                 },
                 onShelterList = { overlay = Overlay.SHELTERS },
+                onPickArea = { overlay = Overlay.AREA },
                 modifier = Modifier.fillMaxSize(),
             )
             fresh.firstOrNull()?.let { item ->
@@ -254,6 +261,14 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
             Overlay.KEEP_WARM -> KeepWarmSheet(state, actions, onClose = { overlay = Overlay.NONE })
             Overlay.RELAY -> RelaySheet(state.tx, onClose = { overlay = Overlay.NONE })
             Overlay.INBOX -> InboxSheet(state, actions, now, onClose = { overlay = Overlay.NONE })
+            Overlay.AREA -> AreaPickerSheet(
+                state.shelterAreas,
+                onPick = {
+                    actions.chooseArea(it)
+                    overlay = Overlay.NONE
+                },
+                onClose = { overlay = Overlay.NONE },
+            )
             Overlay.SHELTER -> shelterPick?.let { ShelterDetailSheet(it, state.myFix, onClose = { overlay = Overlay.NONE }) }
             Overlay.SIGNAL -> state.inbox.firstOrNull { it.id == signalPick }?.let {
                 SignalSheet(state, it, actions, now, onClose = { overlay = Overlay.NONE })
@@ -316,6 +331,10 @@ private fun statusLine(state: UiState, c: AppColors): AnnotatedString = buildAnn
     )
     if (state.vehicleMode == VehicleMode.SIMULATION) item("연습 모드", c.body, strong = false)
     if (!state.listening) item("듣기 꺼짐", c.urgent)
+    when {
+        state.positionJumpM != null || state.positionIgnoring -> item("GPS 이상", c.urgent)
+        state.locationPermission && state.myFix == null && state.chosenArea == null -> item("위치 못 잡음", c.urgent)
+    }
     if (state.gateway.enabled && !state.gateway.online) item("통신 끊김 · 소리와 빛으로 보내요", c.urgent)
     if (state.blackout) item("등화관제 중", c.ink)
     state.endurance?.takeIf { it.low }?.let { e -> item("${if (e.isEv) "배터리" else "연료"} ${e.percent}% 남음", c.urgent) }
@@ -834,7 +853,7 @@ private fun ConfirmSheet(
                     locationText(state),
                     fontSize = Type.body,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (state.shareLocation && state.myFix != null) c.ink else c.body,
+                    color = if (state.shareLocation && state.sendablePosition() != null) c.ink else c.body,
                     modifier = Modifier.weight(1f),
                 )
                 if (state.locationPermission) {
@@ -1197,11 +1216,17 @@ fun AppButton(
     }
 }
 
-private fun locationText(state: UiState): String = when {
-    !state.locationPermission -> "위치 권한이 없어 위치 없이 보내요"
-    !state.shareLocation -> "보내지 않아요"
-    state.myFix == null -> "위치를 찾는 중 · 못 찾으면 위치 없이 보내요"
-    else -> "함께 보내요 (약 40m 범위)"
+private fun locationText(state: UiState, now: Long = System.currentTimeMillis()): String {
+    val fix = state.myFix
+    return when {
+        !state.locationPermission -> "위치 권한이 없어 위치 없이 보내요"
+        !state.shareLocation -> "보내지 않아요"
+        fix == null -> "위치를 못 잡아 위치 없이 보내요"
+        // Old and the car has moved since: sending it would point rescuers to the wrong place.
+        state.sendablePosition(now) == null -> "마지막 위치가 오래돼 위치 없이 보내요"
+        now - fix.timeMs >= 2 * 60_000L -> "함께 보내요 (${ageWord(now - fix.timeMs)} 위치, 그 뒤로 정차 중)"
+        else -> "함께 보내요 (약 40m 범위)"
+    }
 }
 
 /** "북동쪽 약 300m" from our own fix to the sender, or a hint when one side is unknown. */
@@ -1383,7 +1408,8 @@ private fun ShelterSheet(state: UiState, now: Long, onClose: () -> Unit) {
             val fetched = state.online.sheltersFetchedAtMs
             Text(
                 listOfNotNull(
-                    fetched?.let { "${relativeTime(it, now)}에 받아 둔 정보예요" },
+                    state.bundledSheltersDate?.let { "앱에 든 전국 민방위대피소 ($it 기준)" },
+                    fetched?.let { "${relativeTime(it, now)}에 받은 정보 포함" },
                     "통신이 끊겨도 볼 수 있어요",
                     "견본 데이터".takeIf { state.online.sample },
                 ).joinToString(" · "),
@@ -1397,8 +1423,8 @@ private fun ShelterSheet(state: UiState, now: Long, onClose: () -> Unit) {
                     Spacer(Modifier.height(8.dp))
                 }
                 val preferKind = ShelterFinder.preferredKind(state.disaster)
-                val rows = if (fix != null) ShelterFinder.nearest(state.online.shelters, fix.latitude, fix.longitude, 6, preferKind)
-                else state.online.shelters.sortedBy { preferKind != null && !it.kind.contains(preferKind) }.take(6).map { it to null }
+                val rows = if (fix != null && state.chosenArea == null) ShelterFinder.nearest(state.shelters, fix.latitude, fix.longitude, 6, preferKind)
+                else state.shelters.sortedBy { preferKind != null && !it.kind.contains(preferKind) }.take(6).map { it to null }
                 if (preferKind != null && rows.any { it.first.kind.contains(preferKind) }) {
                     Text("‘${state.disaster.label}’ 상황에 맞는 곳을 먼저 보여 드려요", fontSize = Type.body, color = c.body)
                     Spacer(Modifier.height(8.dp))

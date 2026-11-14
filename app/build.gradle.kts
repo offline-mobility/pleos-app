@@ -77,6 +77,37 @@ android {
     }
 }
 
+/**
+ * Ships the country's 민방위대피소 inside the app so shelters can be found with no connection.
+ * The single source is the server's snapshot (server/data, refreshed with `npm run update-civil-shelters`).
+ */
+abstract class CopyCivilShelters : DefaultTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val source: RegularFileProperty
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun copy() {
+        val target = outputDir.get().asFile.resolve("civil-shelters.json")
+        target.parentFile.mkdirs()
+        source.get().asFile.copyTo(target, overwrite = true)
+    }
+}
+
+val copyCivilShelters = tasks.register<CopyCivilShelters>("copyCivilShelters") {
+    source.set(rootProject.layout.projectDirectory.file("server/data/civil-shelters.json"))
+    outputDir.set(layout.buildDirectory.dir("generated/civilShelters"))
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(copyCivilShelters, CopyCivilShelters::outputDir)
+    }
+}
+
 dependencies {
     implementation(libs.vehicle.sdk)
     implementation(libs.tts.sdk)

@@ -1,6 +1,16 @@
 package io.github.offlinemobility.app.ui
 
 import androidx.compose.foundation.Canvas
+import io.github.offlinemobility.app.core.online.Area
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -71,41 +81,133 @@ internal fun UiState.receivedSignals(): List<InboxItem> =
 @Composable
 internal fun AroundMapPanel(
     state: UiState,
+    now: Long,
+    actions: ScreenActions,
     onShelter: (Shelter) -> Unit,
     onSignal: (InboxItem) -> Unit,
     onShelterList: () -> Unit,
+    onPickArea: () -> Unit,
     modifier: Modifier,
 ) {
     val c = LocalAppColors.current
+    val area = state.chosenArea
+    val fix = state.myFix
     Column(modifier.background(c.canvas).border(1.dp, c.line).padding(20.dp)) {
         Row(Modifier.heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("주변 지도", fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.ink, modifier = Modifier.weight(1f))
-            if (state.online.shelters.isNotEmpty()) {
-                Row(
-                    Modifier.heightIn(min = 56.dp).clickable(onClick = onShelterList).padding(start = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("대피소 목록", fontSize = Type.body, fontWeight = FontWeight.SemiBold, color = c.ink)
-                    Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = c.ink, modifier = Modifier.size(32.dp))
-                }
+            Text(
+                if (area != null) "${area.label} 대피소" else "주변 지도",
+                fontSize = Type.title,
+                fontWeight = FontWeight.Bold,
+                color = c.ink,
+                modifier = Modifier.weight(1f),
+            )
+            when {
+                area != null -> LinkText("지역 바꾸기", onPickArea)
+                state.shelters.isNotEmpty() -> LinkText("대피소 목록", onShelterList)
             }
         }
-        val fix = state.myFix
-        if (fix == null) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("내 위치를 찾는 중이에요", fontSize = Type.body, color = c.mute)
+        // Where the position comes from when it is not a fresh GPS reading.
+        when {
+            area != null -> Text("위치를 못 잡아 고른 지역이에요 · 거리는 알 수 없어요", fontSize = Type.meta, color = c.mute)
+            state.positionIgnoring -> Text("GPS 신호가 이상해서 새 위치를 쓰지 않고 있어요", fontSize = Type.meta, color = c.urgent)
+            fix != null && now - fix.timeMs >= STALE_MS -> Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("${ageWord(now - fix.timeMs)} 위치 기준 · GPS가 잡히지 않아요", fontSize = Type.meta, color = c.urgent, modifier = Modifier.weight(1f))
+                LinkText("지역 고르기", onPickArea)
             }
-            return@Column
         }
-        val shelters = ShelterFinder.nearest(
-            state.online.shelters, fix.latitude, fix.longitude, MAP_SHELTERS, ShelterFinder.preferredKind(state.disaster),
+        state.positionJumpM?.let { jump ->
+            Spacer(Modifier.height(12.dp))
+            PositionJumpQuestion(jump, actions.keepPosition, actions.usePositionJump)
+        }
+        Spacer(Modifier.height(8.dp))
+        when {
+            area != null -> AreaShelterList(state.shelters, onShelter, Modifier.weight(1f).fillMaxWidth())
+            fix == null -> NoPosition(state.locationPermission, onPickArea, Modifier.weight(1f).fillMaxWidth())
+            else -> MapWithNearest(state, fix, onShelter, onSignal, Modifier.weight(1f).fillMaxWidth())
+        }
+    }
+}
+
+/** A reading far from the last one at an impossible speed: jamming or spoofing until the person says otherwise. */
+@Composable
+private fun PositionJumpQuestion(jumpM: Double, onKeep: () -> Unit, onUse: () -> Unit) {
+    val c = LocalAppColors.current
+    Column(Modifier.fillMaxWidth().border(2.dp, c.urgent).padding(16.dp)) {
+        Text("위치가 갑자기 ${Geo.distanceWord(jumpM)} 바뀌었어요", fontSize = Type.body, fontWeight = FontWeight.Bold, color = c.ink)
+        Text("GPS 교란일 수 있어요. 차가 정말 그만큼 움직였나요?", fontSize = Type.meta, color = c.body)
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            AppButton("아니요, 그대로 두기", onKeep, Kind.STRONG_NEUTRAL, Modifier.weight(1.4f), height = 72.dp)
+            AppButton("네, 새 위치로", onUse, Kind.SECONDARY, Modifier.weight(1f), height = 72.dp)
+        }
+    }
+}
+
+@Composable
+private fun NoPosition(permission: Boolean, onPickArea: () -> Unit, modifier: Modifier) {
+    val c = LocalAppColors.current
+    Column(modifier.padding(horizontal = 24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(if (permission) "내 위치를 찾고 있어요" else "위치 권한이 없어요", fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.ink)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "GPS가 잡히지 않으면 지금 있는 지역을 골라 주세요. 그 지역 대피소를 보여 드려요".keepWords(),
+            fontSize = Type.body,
+            lineHeight = Type.lines(Type.body),
+            color = c.body,
+            textAlign = TextAlign.Center,
         )
-        val signals = state.receivedSignals().mapNotNull { item ->
-            item.frame.location
-                ?.let { Geo.offset(fix.latitude, fix.longitude, it.latitude, it.longitude) }
-                ?.takeIf { it.meters <= SIGNAL_MAX_M }
-                ?.let { item to it }
+        Spacer(Modifier.height(24.dp))
+        AppButton("지역 고르기", onPickArea, Kind.STRONG_NEUTRAL, Modifier.fillMaxWidth())
+    }
+}
+
+@Composable
+private fun AreaShelterList(shelters: List<Shelter>, onShelter: (Shelter) -> Unit, modifier: Modifier) {
+    val c = LocalAppColors.current
+    if (shelters.isEmpty()) {
+        Box(modifier, contentAlignment = Alignment.Center) {
+            Text("이 지역에는 앱에 든 대피소가 없어요", fontSize = Type.body, color = c.mute)
         }
+        return
+    }
+    LazyColumn(modifier) {
+        items(shelters, key = { it.id }) { shelter ->
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 88.dp).clickable { onShelter(shelter) }.padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Home, contentDescription = null, tint = c.ink, modifier = Modifier.size(32.dp))
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(shelter.name, fontSize = Type.body, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        listOfNotNull(shelter.address.ifEmpty { null }, shelter.capacity?.let { "약 ${"%,d".format(it)}명" }).joinToString(" · "),
+                        fontSize = Type.meta,
+                        color = c.body,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = c.mute, modifier = Modifier.size(32.dp))
+            }
+            Divider()
+        }
+    }
+}
+
+@Composable
+private fun MapWithNearest(state: UiState, fix: Fix, onShelter: (Shelter) -> Unit, onSignal: (InboxItem) -> Unit, modifier: Modifier) {
+    val c = LocalAppColors.current
+    val shelters = ShelterFinder.nearest(
+        state.shelters, fix.latitude, fix.longitude, MAP_SHELTERS, ShelterFinder.preferredKind(state.disaster),
+    )
+    val signals = state.receivedSignals().mapNotNull { item ->
+        item.frame.location
+            ?.let { Geo.offset(fix.latitude, fix.longitude, it.latitude, it.longitude) }
+            ?.takeIf { it.meters <= SIGNAL_MAX_M }
+            ?.let { item to it }
+    }
+    Column(modifier) {
         val farthest = (shelters.map { it.second.meters } + signals.map { it.second.meters }).maxOrNull() ?: 0.0
         val outerM = RING_STEPS_M.firstOrNull { it >= farthest * 1.05 } ?: RING_STEPS_M.last()
         val innerM = RING_STEPS_M.lastOrNull { it <= outerM / 2 } ?: (outerM / 2)
@@ -142,6 +244,75 @@ internal fun AroundMapPanel(
         }
     }
 }
+
+@Composable
+private fun LinkText(text: String, onClick: () -> Unit) {
+    val c = LocalAppColors.current
+    Row(
+        Modifier.heightIn(min = 56.dp).clickable(onClick = onClick).padding(start = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text, fontSize = Type.body, fontWeight = FontWeight.SemiBold, color = c.ink)
+        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = c.ink, modifier = Modifier.size(32.dp))
+    }
+}
+
+/**
+ * Picking 시·도 then 시·군·구 by hand when GPS gives no position. One fixed frame for both steps,
+ * with 이전 / 닫기 on the second, as for the disaster guide.
+ */
+@Composable
+internal fun AreaPickerSheet(areas: Map<String, List<String>>, onPick: (Area) -> Unit, onClose: () -> Unit) {
+    val c = LocalAppColors.current
+    var province by remember { mutableStateOf<String?>(null) }
+    SheetScrim(onClose) {
+        Sheet(width = 1500.dp, modifier = Modifier.fillMaxHeight(0.9f)) {
+            val chosen = province
+            Text(chosen ?: "지금 있는 지역을 골라 주세요", fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink)
+            Text(
+                if (chosen == null) "시·도를 고르세요" else "시·군·구를 고르세요",
+                fontSize = Type.body,
+                color = c.body,
+            )
+            Spacer(Modifier.height(20.dp))
+            val cells = if (chosen == null) areas.keys.toList() else areas[chosen].orEmpty()
+            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (areas.isEmpty()) Text("대피소 데이터를 아직 불러오지 못했어요", fontSize = Type.body, color = c.mute)
+                cells.chunked(AREA_COLUMNS).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        row.forEach { name ->
+                            Box(
+                                Modifier.weight(1f).height(88.dp).border(1.dp, c.line).clickable {
+                                    if (chosen == null) {
+                                        val districts = areas[name].orEmpty()
+                                        // A 시·도 without 시·군·구 (세종) is an area by itself.
+                                        if (districts.all { it.isEmpty() }) onPick(Area(name, "")) else province = name
+                                    } else {
+                                        onPick(Area(chosen, name))
+                                    }
+                                },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(name.ifEmpty { "그 밖의 지역" }, fontSize = Type.body, fontWeight = FontWeight.SemiBold, color = c.ink, maxLines = 1)
+                            }
+                        }
+                        repeat(AREA_COLUMNS - row.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
+                if (chosen != null) AppButton("이전", { province = null }, Kind.SECONDARY, Modifier.weight(1f))
+                AppButton("닫기", onClose, Kind.SECONDARY, Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+private const val AREA_COLUMNS = 5
+
+/** Positions older than this are labelled with their age. */
+private const val STALE_MS = 2 * 60_000L
 
 /** A mark's centre on screen and the box it covers, so labels can stay clear of it. */
 private class Placed(val center: Offset, val box: Rect)

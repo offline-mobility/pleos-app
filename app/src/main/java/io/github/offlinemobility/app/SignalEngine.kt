@@ -25,6 +25,11 @@ import io.github.offlinemobility.app.core.gateway.RelayLink
 import io.github.offlinemobility.app.core.gateway.RescueReport
 import io.github.offlinemobility.app.core.online.OfficialAlert
 import io.github.offlinemobility.app.core.online.RemoteIncident
+import io.github.offlinemobility.app.core.online.Area
+import io.github.offlinemobility.app.core.online.CivilShelters
+import io.github.offlinemobility.app.core.online.Shelter
+import io.github.offlinemobility.app.core.position.PositionGuard
+import io.github.offlinemobility.app.core.position.positionStillValid
 import io.github.offlinemobility.app.core.online.ShelterFinder
 import io.github.offlinemobility.app.gateway.GatewayStatus
 import io.github.offlinemobility.app.net.ServerClient
@@ -63,6 +68,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -163,8 +169,28 @@ data class UiState(
     val inbox: List<InboxItem> = emptyList(),
     val tx: TxState = TxState(),
     val senderId: Int = 0,
-    /** Own GPS fix, if known and recent. */
+    /**
+     * Own position the app trusts (see [PositionGuard]): the latest believable GPS reading, or one
+     * remembered from earlier. It may be minutes or hours old; [Fix.timeMs] says when it was taken.
+     */
     val myFix: Fix? = null,
+    /** A GPS reading that jumped too far to believe, held until the person decides; metres from [myFix]. */
+    val positionJumpM: Double? = null,
+    /** Readings near a place the person rejected are being ignored (likely jamming or spoofing). */
+    val positionIgnoring: Boolean = false,
+    /** When the car was last put in P and has stayed there; null while it is not parked. */
+    val parkedSinceMs: Long? = null,
+    /** Area picked by hand while the car's position is unknown. */
+    val chosenArea: Area? = null,
+    /** 시·도 → 시·군·구 of the shelters inside the app, for picking an area by hand. */
+    val shelterAreas: Map<String, List<String>> = emptyMap(),
+    /** Date of the shelter data inside the app, e.g. "2026-11-13"; null until it is loaded. */
+    val bundledSheltersDate: String? = null,
+    /**
+     * Shelters to show: around [myFix] from the app's own data plus whatever the server sent, or
+     * those in [chosenArea] when the position is unknown.
+     */
+    val shelters: List<Shelter> = emptyList(),
     val locationPermission: Boolean = false,
     /** Attach the car's position to outgoing messages. */
     val shareLocation: Boolean = true,
@@ -194,12 +220,16 @@ data class UiState(
             if (!keepWarm.support.heater) return null
             val remainingWh = energy?.evRemainingWh?.takeIf { it > 0 } ?: return null
             val shelterKm = myFix?.let { fix ->
-                ShelterFinder.nearest(online.shelters, fix.latitude, fix.longitude, 1).firstOrNull()?.second?.meters?.div(1000.0)
+                ShelterFinder.nearest(shelters, fix.latitude, fix.longitude, 1).firstOrNull()?.second?.meters?.div(1000.0)
             }
             return KeepWarm.estimate(remainingWh, people, cabinSealed, shelterKm)
         }
 
     val endurance: EnduranceEstimate? get() = energy?.let { Endurance.estimate(it, lightsOn = lightUsable) }
+
+    /** [myFix] if it may still be sent as where the car is now (see [positionStillValid]). */
+    fun sendablePosition(nowMs: Long = System.currentTimeMillis()): Fix? =
+        myFix?.takeIf { positionStillValid(it, nowMs, parkedSinceMs) }
 
     val safety: SafetyVerdict
         get() = SafetyGate.evaluate(VehicleSafetyState(gear), if (useLight) TransmitChannel.LIGHT else TransmitChannel.SOUND)
@@ -241,8 +271,13 @@ class SignalEngine(application: Application) {
         server,
         scope,
         isOnline = { _state.value.gateway.online },
-        position = { locationTracker.current() },
+        position = { _state.value.myFix },
     )
+    private val positionGuard = PositionGuard()
+    private var civil: CivilShelters? = null
+    /** Where the shelter list was last worked out; it is redone after moving [SHELTER_REFRESH_M]. */
+    private var sheltersCenter: Fix? = null
+    private var lastSavedFix: Fix? = null
     private val prefs = application.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
     private val relayPolicy = RelayPolicy(ownSenderId = senderId)
 
@@ -317,8 +352,10 @@ class SignalEngine(application: Application) {
         onlineSync.start()
         scope.launch {
             onlineSync.state.collect { online ->
+                val sheltersChanged = online.shelters != _state.value.online.shelters
                 _state.update { it.copy(online = online) }
                 mergeServerIncidents(online.incidents)
+                if (sheltersChanged) refreshShelters(force = true)
             }
         }
         scope.launch { uploader.status.collect { st -> _state.update { it.copy(gateway = st) } } }
@@ -330,7 +367,17 @@ class SignalEngine(application: Application) {
             blackoutByMode = modeBlackout
             _state.update { it.copy(disaster = savedDisaster, blackout = modeBlackout) }
         }
-        scope.launch { locationTracker.fix.collect { fix -> _state.update { it.copy(myFix = fix) } } }
+        restoreSavedPosition()
+        scope.launch {
+            civil = withContext(Dispatchers.IO) {
+                runCatching {
+                    application.assets.open(CIVIL_ASSET).bufferedReader().use { CivilShelters.parse(it.readText()) }
+                }.onFailure { debugLog { "civil shelters not loaded: ${it.message}" } }.getOrNull()
+            }
+            _state.update { it.copy(shelterAreas = civil?.areas.orEmpty(), bundledSheltersDate = civil?.generatedAt) }
+            refreshShelters(force = true)
+        }
+        scope.launch { locationTracker.fix.collect { fix -> if (fix != null) onReading(fix) } }
         refreshLocation()
         connectVehicle()
         scope.launch { receiver.frames.collect(::onDecoded) }
@@ -382,7 +429,12 @@ class SignalEngine(application: Application) {
 
     private fun onGear(gear: GearState) {
         debugLog { "gear=$gear" }
-        _state.update { it.copy(gear = gear) }
+        _state.update {
+            it.copy(
+                gear = gear,
+                parkedSinceMs = if (gear == GearState.PARK) it.parkedSinceMs ?: System.currentTimeMillis() else null,
+            )
+        }
         // Leaving P stops every outgoing signal immediately; lamps are restored by the runner.
         if (gear != GearState.PARK) {
             stopTransmission("P단 해제로 송신을 중단했습니다")
@@ -483,9 +535,87 @@ class SignalEngine(application: Application) {
         if (granted) locationTracker.start()
     }
 
+    private fun onReading(fix: Fix) {
+        val before = positionGuard.trusted
+        positionGuard.offer(fix)
+        val live = positionGuard.trusted?.takeIf { it != before }
+        publishPosition(clearArea = live != null)
+        live?.let(::savePosition)
+    }
+
+    /** The car really moved: use the reading that looked like a jump. */
+    fun usePositionJump() {
+        positionGuard.useSuspect()
+        publishPosition(clearArea = true)
+        positionGuard.trusted?.let(::savePosition)
+    }
+
+    /** The car has not moved: keep the old position and stop asking about that place. */
+    fun keepPosition() {
+        positionGuard.keepTrusted()
+        publishPosition(clearArea = false)
+    }
+
+    /** Area picked by hand while GPS gives no position; null goes back to the position. */
+    fun chooseArea(area: Area?) {
+        _state.update { it.copy(chosenArea = area) }
+        refreshShelters(force = true)
+    }
+
+    private fun publishPosition(clearArea: Boolean) {
+        _state.update {
+            it.copy(
+                myFix = positionGuard.trusted,
+                positionJumpM = positionGuard.suspectJumpM(),
+                positionIgnoring = positionGuard.ignoring,
+                chosenArea = if (clearArea) null else it.chosenArea,
+            )
+        }
+        refreshShelters()
+    }
+
+    /** Shelters for the current position or chosen area, from the app's data and the server's. */
+    private fun refreshShelters(force: Boolean = false) {
+        val s = _state.value
+        val area = s.chosenArea
+        val fix = s.myFix
+        val list = when {
+            area != null -> civil?.inArea(area).orEmpty()
+            fix != null -> {
+                val moved = sheltersCenter?.let { Geo.offset(it.latitude, it.longitude, fix.latitude, fix.longitude).meters }
+                if (!force && moved != null && moved < SHELTER_REFRESH_M) return
+                sheltersCenter = fix
+                (s.online.shelters + civil?.near(fix.latitude, fix.longitude, SHELTER_RADIUS_KM, SHELTER_COUNT).orEmpty())
+                    .distinctBy { it.id }
+            }
+            else -> s.online.shelters
+        }
+        _state.update { it.copy(shelters = list) }
+    }
+
+    /** Remembered across restarts so a later jam still leaves the last known place. */
+    private fun savePosition(fix: Fix) {
+        val last = lastSavedFix
+        if (last != null && fix.timeMs - last.timeMs < 60_000 &&
+            Geo.offset(last.latitude, last.longitude, fix.latitude, fix.longitude).meters < 50
+        ) return
+        lastSavedFix = fix
+        prefs.edit().putString(KEY_LAST_FIX, "${fix.latitude},${fix.longitude},${fix.timeMs}").apply()
+    }
+
+    private fun restoreSavedPosition() {
+        val parts = prefs.getString(KEY_LAST_FIX, null)?.split(',') ?: return
+        val lat = parts.getOrNull(0)?.toDoubleOrNull() ?: return
+        val lon = parts.getOrNull(1)?.toDoubleOrNull() ?: return
+        val time = parts.getOrNull(2)?.toLongOrNull() ?: return
+        positionGuard.restore(Fix(lat, lon, 0f, time))
+        lastSavedFix = positionGuard.trusted
+        publishPosition(clearArea = false)
+    }
+
     private fun outgoingLocation(): GeoCell? {
         if (!_state.value.shareLocation) return null
-        val fix = locationTracker.current() ?: return null
+        val fix = _state.value.sendablePosition() ?: return null
         return GeoCell.of(fix.latitude, fix.longitude)
     }
 
@@ -706,7 +836,7 @@ class SignalEngine(application: Application) {
     /** Speaks a new message once our own sound transmission (if any) has finished. */
     private fun announce(frame: RescueFrame) {
         if (!_state.value.voiceAnnounce || !_state.value.voiceAvailable) return
-        val text = spokenText(frame, locationTracker.current())
+        val text = spokenText(frame, _state.value.myFix)
         scope.launch {
             while (_state.value.tx.soundActive) delay(300)
             announcer.say(text)
@@ -785,7 +915,7 @@ class SignalEngine(application: Application) {
 
     /** A point 100–900 m away from our own fix (or central Seoul when we have none). */
     private fun demoLocation(random: Random): GeoCell {
-        val base = locationTracker.current()
+        val base = _state.value.myFix
         val lat0 = base?.latitude ?: 37.5665
         val lon0 = base?.longitude ?: 126.9780
         val distance = random.nextDouble(100.0, 900.0)
@@ -796,6 +926,11 @@ class SignalEngine(application: Application) {
     }
 
     private companion object {
+        const val CIVIL_ASSET = "civil-shelters.json"
+        const val SHELTER_RADIUS_KM = 10.0
+        const val SHELTER_COUNT = 80
+        const val SHELTER_REFRESH_M = 200.0
+        const val KEY_LAST_FIX = "last_fix"
         const val KEY_DISASTER = "disaster"
         const val KEY_OWN_SENT = "own_sent"
         const val OWN_SENT_KEEP_MS = 72 * 3_600_000L
