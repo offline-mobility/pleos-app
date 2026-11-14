@@ -4,7 +4,7 @@ package io.github.offlinemobility.app.core.protocol
  * Predefined rescue messages. The code is the 5-bit value carried on air, so it must stay stable.
  */
 enum class RescueMessage(val code: Int, val title: String, val critical: Boolean) {
-    SOS(0, "긴급 구조 요청", true),
+    SOS(0, "SOS 긴급 요청", true),
     MEDICAL(1, "응급 환자 발생", true),
     TRAPPED(2, "고립·이동 불가", true),
     FIRE(3, "화재·연기", true),

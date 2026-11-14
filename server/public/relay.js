@@ -2,7 +2,7 @@
 // QR code into one report for POST /api/reports. Every value from the link is untrusted.
 
 export const RELAY_LABEL = {
-  SOS: '긴급 구조 요청', MEDICAL: '응급 환자', TRAPPED: '고립됨', FIRE: '화재·연기', FLOOD: '침수',
+  SOS: 'SOS 긴급 요청', MEDICAL: '응급 환자', TRAPPED: '고립됨', FIRE: '화재·연기', FLOOD: '침수',
   HAZARD: '가스·위험물', COLD: '추위·저체온', COLLAPSE: '붕괴·낙석', CBRN: '화생방·방사능',
   VULNERABLE: '노약자·어린이', WATER: '식수 필요', FOOD: '식량 필요', MEDICINE: '약 필요', POWER: '연료·전력 부족',
   ROAD_BLOCKED: '앞길 막힘', ROUTE_CLEAR: '지나갈 수 있음', SHELTER: '대피소 있음', RESCUE_TEAM: '구조대 접근',

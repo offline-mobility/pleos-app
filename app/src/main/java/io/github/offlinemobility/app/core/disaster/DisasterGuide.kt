@@ -63,26 +63,22 @@ data class DisasterGuide(
     val sources: List<Source>,
 ) {
     /**
-     * The eight messages on the first screen (the ninth cell opens the rest): this situation's five
-     * plus the first of [FIRST_SCREEN_ORDER] to fill up, shown in that same fixed order so a message
-     * keeps its place when the situation changes.
+     * The eight messages on the first screen (the ninth cell opens the rest): [FIRST_SCREEN_FIXED] in
+     * the same places whatever the situation, then one cell for this situation — its first message
+     * that is not already there, or [FIRST_SCREEN_SPARE] when it has none.
      */
     val firstScreen: List<RescueMessage>
-        get() = (primary + FIRST_SCREEN_ORDER).distinct().take(FIRST_SCREEN_SIZE)
-            .sortedBy { FIRST_SCREEN_ORDER.indexOf(it) }
+        get() = FIRST_SCREEN_FIXED + (primary.firstOrNull { it !in FIRST_SCREEN_FIXED } ?: FIRST_SCREEN_SPARE)
 
     companion object {
-        const val FIRST_SCREEN_SIZE = 8
-
         /**
-         * Order on the first screen, and the order used to fill it. The generic SOS is left to the
-         * "다른 상황" list: it says less than any specific message.
+         * Always on the first screen, in this order. SOS comes first: it is the one to press when
+         * nothing else fits or there is no time to choose.
          */
-        val FIRST_SCREEN_ORDER = listOf(
-            MEDICAL, POWER, TRAPPED, FIRE, FLOOD, WATER, COLD, VULNERABLE, MEDICINE, FOOD,
-            RescueMessage.HAZARD, COLLAPSE, RescueMessage.CBRN, ROAD_BLOCKED, SHELTER, ROUTE_CLEAR,
-            RescueMessage.RESCUE_TEAM, RescueMessage.ALL_SAFE,
-        )
+        val FIRST_SCREEN_FIXED = listOf(RescueMessage.SOS, TRAPPED, POWER, FLOOD, FIRE, WATER, MEDICAL)
+
+        /** The situation cell when the situation has nothing beyond [FIRST_SCREEN_FIXED] (일반 재난). */
+        val FIRST_SCREEN_SPARE = COLD
     }
 }
 

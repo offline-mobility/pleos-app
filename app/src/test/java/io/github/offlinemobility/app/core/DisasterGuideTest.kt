@@ -28,23 +28,25 @@ class DisasterGuideTest {
     }
 
     @Test
-    fun firstScreenIsEightMessagesInTheFixedOrderIncludingTheSituationsOwn() {
-        val order = DisasterGuide.FIRST_SCREEN_ORDER
+    fun firstScreenKeepsSevenFixedCellsAndOneForTheSituation() {
+        val fixed = listOf(
+            RescueMessage.SOS, RescueMessage.TRAPPED, RescueMessage.POWER, RescueMessage.FLOOD,
+            RescueMessage.FIRE, RescueMessage.WATER, RescueMessage.MEDICAL,
+        )
+        assertEquals(fixed, DisasterGuide.FIRST_SCREEN_FIXED)
         for (guide in DisasterGuides.all) {
             val first = guide.firstScreen
             assertEquals(guide.type.name, 8, first.size)
             assertEquals(guide.type.name, 8, first.distinct().size)
-            assertTrue(guide.type.name, first.containsAll(guide.primary))
-            assertTrue(guide.type.name, guide.primary.all { it in order })
-            assertEquals(guide.type.name, first.sortedBy { order.indexOf(it) }, first)
-            assertTrue(guide.type.name, RescueMessage.SOS !in first && RescueMessage.ACK !in first)
+            assertEquals(guide.type.name, fixed, first.take(7))
+            assertTrue(guide.type.name, RescueMessage.ACK !in first)
         }
-        val general = listOf(
-            RescueMessage.MEDICAL, RescueMessage.POWER, RescueMessage.TRAPPED, RescueMessage.FIRE,
-            RescueMessage.FLOOD, RescueMessage.WATER, RescueMessage.COLD, RescueMessage.VULNERABLE,
-        )
-        assertEquals(general, DisasterGuides.of(DisasterType.GENERAL).firstScreen)
-        assertEquals(general, DisasterGuides.of(DisasterType.HEAT).firstScreen)
+        fun situationCell(type: DisasterType) = DisasterGuides.of(type).firstScreen.last()
+        assertEquals(RescueMessage.COLD, situationCell(DisasterType.GENERAL))
+        assertEquals(RescueMessage.COLLAPSE, situationCell(DisasterType.EARTHQUAKE))
+        assertEquals(RescueMessage.VULNERABLE, situationCell(DisasterType.HEAT))
+        assertEquals(RescueMessage.CBRN, situationCell(DisasterType.CHEMICAL))
+        assertEquals(RescueMessage.MEDICINE, situationCell(DisasterType.BLACKOUT))
     }
 
     @Test

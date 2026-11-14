@@ -48,7 +48,7 @@ val RescueMessage.asksPeople: Boolean
 
 val RescueMessage.copy: MessageCopy
     get() = when (this) {
-        RescueMessage.SOS -> MessageCopy("긴급 구조 요청", Icons.Filled.Sos, Tone.URGENT)
+        RescueMessage.SOS -> MessageCopy("SOS 긴급 요청", Icons.Filled.Sos, Tone.URGENT)
         RescueMessage.MEDICAL -> MessageCopy("응급 환자", Icons.Filled.MedicalServices, Tone.URGENT)
         RescueMessage.TRAPPED -> MessageCopy("고립됨", Icons.Filled.CarCrash, Tone.URGENT)
         RescueMessage.FIRE -> MessageCopy("화재·연기", Icons.Filled.LocalFireDepartment, Tone.URGENT)
@@ -72,7 +72,7 @@ val RescueMessage.copy: MessageCopy
 
 /** Message groups for the "다른 상황" sheet; messages already on the first screen are left out. */
 private val AllGroups = listOf(
-    "위험" to listOf(RescueMessage.SOS, RescueMessage.FIRE, RescueMessage.FLOOD, RescueMessage.HAZARD, RescueMessage.COLLAPSE, RescueMessage.CBRN),
+    "위험" to listOf(RescueMessage.FIRE, RescueMessage.FLOOD, RescueMessage.HAZARD, RescueMessage.COLLAPSE, RescueMessage.CBRN),
     "사람" to listOf(RescueMessage.MEDICAL, RescueMessage.TRAPPED, RescueMessage.VULNERABLE, RescueMessage.COLD, RescueMessage.MEDICINE),
     "물자" to listOf(RescueMessage.WATER, RescueMessage.FOOD, RescueMessage.POWER),
     "길·대피" to listOf(RescueMessage.ROAD_BLOCKED, RescueMessage.ROUTE_CLEAR, RescueMessage.SHELTER),
