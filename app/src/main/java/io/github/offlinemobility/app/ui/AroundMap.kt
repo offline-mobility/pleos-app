@@ -138,7 +138,7 @@ private fun PositionJumpQuestion(jumpM: Double, onKeep: () -> Unit, onUse: () ->
         Text("GPS 교란일 수 있어요. 차가 정말 그만큼 움직였나요?", fontSize = Type.meta, color = c.body)
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            AppButton("아니요, 그대로 두기", onKeep, Kind.STRONG_NEUTRAL, Modifier.weight(1.4f), height = 72.dp)
+            AppButton("아니요, 그대로 두기", onKeep, Kind.STRONG_NEUTRAL, Modifier.weight(1f), height = 72.dp)
             AppButton("네, 새 위치로", onUse, Kind.SECONDARY, Modifier.weight(1f), height = 72.dp)
         }
     }

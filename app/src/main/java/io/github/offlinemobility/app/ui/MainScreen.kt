@@ -476,7 +476,7 @@ private fun SendArea(
 /** 저전력 모드 cell: usable on a parked car with a traction battery reading and a heater the app may control. */
 private enum class LowPower { UNAVAILABLE, READY, ON }
 
-/** A cell that opens something instead of sending: grey, or filled black while its mode is on. */
+/** A cell that opens something instead of sending: white like the others, filled black while its mode is on. */
 @Composable
 private fun FunctionTile(icon: ImageVector, title: String, modifier: Modifier, on: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
     val c = LocalAppColors.current
@@ -486,7 +486,7 @@ private fun FunctionTile(icon: ImageVector, title: String, modifier: Modifier, o
         else -> c.mute
     }
     Column(
-        modifier.heightIn(min = Size.tile).background(if (on) c.ink else c.surface).border(1.dp, if (on) c.ink else c.line)
+        modifier.heightIn(min = Size.tile).background(if (on) c.ink else c.canvas).border(1.dp, if (on) c.ink else c.line)
             .clickable(enabled = enabled, onClick = onClick).padding(16.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -962,7 +962,7 @@ private fun ConfirmSheet(
             Spacer(Modifier.height(28.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
                 AppButton("취소", onCancel, Kind.SECONDARY, Modifier.weight(1f))
-                AppButton("보내기", onSend, Kind.TONE, Modifier.weight(1.6f), tone = copy.tone, enabled = state.canTransmit)
+                AppButton("보내기", onSend, Kind.TONE, Modifier.weight(1f), tone = copy.tone, enabled = state.canTransmit)
             }
         }
     }
@@ -1458,7 +1458,7 @@ private fun AlertBanner(alert: OfficialAlert, current: DisasterType, onAccept: (
         Row(horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
             AppButton("닫기", onDismiss, Kind.SECONDARY, Modifier.weight(1f), height = 64.dp)
             if (suggest != null) {
-                AppButton("‘${suggest.label}’ 행동요령 보기", onAccept, Kind.TONE, Modifier.weight(2f), height = 64.dp, tone = Tone.URGENT)
+                AppButton("‘${suggest.label}’ 행동요령 보기", onAccept, Kind.TONE, Modifier.weight(1f), height = 64.dp, tone = Tone.URGENT)
             }
         }
     }

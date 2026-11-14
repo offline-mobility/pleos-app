@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -65,7 +66,8 @@ internal fun KeepWarmSheet(state: UiState, actions: ScreenActions, onClose: () -
     val warm = state.keepWarm
     val estimate = state.keepWarmEstimate
     SheetScrim(onClose) {
-        Sheet(width = 1000.dp) {
+        // One frame for both states (choosing a plan, and running): it must not shrink on 시작하기.
+        Sheet(width = 1000.dp, modifier = Modifier.fillMaxHeight(0.82f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.BatterySaver, contentDescription = null, tint = c.ink, modifier = Modifier.size(52.dp))
                 Spacer(Modifier.width(16.dp))
@@ -80,7 +82,7 @@ internal fun KeepWarmSheet(state: UiState, actions: ScreenActions, onClose: () -
             Text("구조를 기다리는 동안 차가 난방을 알아서 조절해 배터리를 오래 써요".keepWords(), fontSize = Type.body, lineHeight = Type.lines(Type.body), color = c.body)
             Spacer(Modifier.height(16.dp))
 
-            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                 if (warm.active) {
                     Divider()
                     InfoRow("지금") {
@@ -154,14 +156,14 @@ internal fun KeepWarmSheet(state: UiState, actions: ScreenActions, onClose: () -
             Row(horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
                 if (warm.active) {
                     AppButton("닫기", onClose, Kind.SECONDARY, Modifier.weight(1f))
-                    AppButton("그만하고 원래 난방으로", actions.stopKeepWarm, Kind.STRONG_NEUTRAL, Modifier.weight(1.6f))
+                    AppButton("그만하기", actions.stopKeepWarm, Kind.STRONG_NEUTRAL, Modifier.weight(1f))
                 } else {
                     AppButton("취소", onClose, Kind.SECONDARY, Modifier.weight(1f))
                     AppButton(
                         "시작하기",
                         actions.startKeepWarm,
                         Kind.TONE,
-                        Modifier.weight(1.6f),
+                        Modifier.weight(1f),
                         tone = Tone.NEUTRAL,
                         enabled = estimate != null && state.gear == GearState.PARK,
                     )
