@@ -24,6 +24,11 @@ import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import io.github.offlinemobility.app.core.protocol.RescueMessage
 
 enum class Tone { URGENT, HELP, SAFE, NEUTRAL }
@@ -103,6 +108,23 @@ fun peopleText(people: Int): String? = when (people) {
     0 -> null
     15 -> "15명 이상"
     else -> "${people}명"
+}
+
+/**
+ * "응급 환자  3명": the head count is set apart by space and a lighter weight, not by a "·",
+ * because titles such as "화재·연기" already use that mark.
+ */
+@Composable
+fun titleWithPeople(message: RescueMessage, people: Int): AnnotatedString {
+    val c = LocalAppColors.current
+    val count = peopleText(people)?.takeIf { message.asksPeople }
+    return buildAnnotatedString {
+        append(message.copy.title)
+        if (count != null) {
+            append("  ")
+            withStyle(SpanStyle(fontWeight = FontWeight.Medium, color = c.body)) { append(count) }
+        }
+    }
 }
 
 fun relativeTime(atMs: Long, nowMs: Long): String {

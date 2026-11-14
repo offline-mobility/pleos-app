@@ -31,7 +31,8 @@ class DisasterGuideTest {
         for (guide in DisasterGuides.all) {
             assertTrue(guide.type.name, guide.sources.any { it.kind == SourceKind.KOREA_OFFICIAL })
             assertTrue(guide.type.name, guide.sources.all { it.url.startsWith("https://") })
-            assertTrue(guide.type.name, guide.actions.isNotEmpty() && guide.headline.isNotBlank())
+            assertTrue(guide.type.name, guide.actions.isNotEmpty())
+            assertTrue(guide.type.name, guide.sources.all { it.org.isNotBlank() && it.org.length <= 12 })
         }
     }
 

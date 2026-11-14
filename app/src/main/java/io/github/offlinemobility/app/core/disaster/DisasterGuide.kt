@@ -44,15 +44,14 @@ enum class SourceKind(val label: String) {
     NEWS("언론 보도"),
 }
 
-data class Source(val name: String, val url: String, val kind: SourceKind)
+/** [org] is the short publisher name shown on screen; [name] and [url] stay for the documents. */
+data class Source(val name: String, val url: String, val kind: SourceKind, val org: String)
 
 /** One action line; [foreign] marks guidance taken from a foreign official source. */
 data class Step(val text: String, val foreign: Boolean = false)
 
 data class DisasterGuide(
     val type: DisasterType,
-    /** The single most important instruction, shown on the main screen. */
-    val headline: String,
     val actions: List<Step>,
     val avoid: List<Step>,
     val carRisk: String?,
@@ -73,12 +72,11 @@ object DisasterGuides {
     private fun sk(category: String) =
         "https://www.safekorea.go.kr/safekorea-kor/acts/nacts/action-guide.do?category=$category&menuSn=4"
 
-    private fun official(name: String, category: String) = Source(name, sk(category), SourceKind.KOREA_OFFICIAL)
+    private fun official(name: String, category: String) = Source(name, sk(category), SourceKind.KOREA_OFFICIAL, "행정안전부")
 
     val all: List<DisasterGuide> = listOf(
         DisasterGuide(
             type = DisasterType.GENERAL,
-            headline = "안전한 곳에 차를 세우고 주변 차량과 신호를 주고받으세요",
             actions = listOf(
                 Step("도로 오른쪽이나 빈터에 차를 세웁니다"),
                 Step("재난방송·라디오로 상황을 확인합니다"),
@@ -94,7 +92,6 @@ object DisasterGuides {
         ),
         DisasterGuide(
             type = DisasterType.EARTHQUAKE,
-            headline = "비상등을 켜고 도로 오른쪽에 세운 뒤, 키를 꽂아 두고 걸어서 대피하세요",
             actions = listOf(
                 Step("비상등을 켜고 서서히 속도를 줄입니다"),
                 Step("도로 오른쪽에 차를 세웁니다"),
@@ -110,12 +107,11 @@ object DisasterGuides {
             blackout = false,
             sources = listOf(
                 official("국민행동요령 · 지진", "earthQuake"),
-                Source("광명시 지진 행동요령", "https://www.gm.go.kr/pt/partInfo/sf/emergencyact/naturedisaster/PTMN753.jsp", SourceKind.KOREA_LOCAL),
+                Source("광명시 지진 행동요령", "https://www.gm.go.kr/pt/partInfo/sf/emergencyact/naturedisaster/PTMN753.jsp", SourceKind.KOREA_LOCAL, "광명시"),
             ),
         ),
         DisasterGuide(
             type = DisasterType.WILDFIRE,
-            headline = "산에서 먼 도로로, 불이 번지는 방향을 피해 이동하세요",
             actions = listOf(
                 Step("산과 멀리 떨어진 도로로 이동합니다"),
                 Step("산불이 번지는 경로에서 벗어납니다"),
@@ -134,12 +130,11 @@ object DisasterGuides {
             blackout = false,
             sources = listOf(
                 official("국민행동요령 · 산불", "forestFires"),
-                Source("호주 빅토리아주 소방청(CFA) 차 안에서 안전하게", "https://www.cfa.vic.gov.au/plan-prepare/staying-safe-in-the-car", SourceKind.FOREIGN_OFFICIAL),
+                Source("호주 빅토리아주 소방청(CFA) 차 안에서 안전하게", "https://www.cfa.vic.gov.au/plan-prepare/staying-safe-in-the-car", SourceKind.FOREIGN_OFFICIAL, "호주 빅토리아주 소방청"),
             ),
         ),
         DisasterGuide(
             type = DisasterType.FLOOD,
-            headline = "물이 찬 도로와 지하차도에는 절대 들어가지 마세요",
             actions = listOf(
                 Step("침수된 지하차도에 들어섰다면 차를 두고 바로 밖으로 나갑니다"),
                 Step("타이어 3분의 2가 잠기기 전에 저단 기어로 빠져나갑니다"),
@@ -152,19 +147,18 @@ object DisasterGuides {
                 Step("조금이라도 물에 잠긴 지하차도와 도로를 지나가지 않습니다"),
                 Step("차를 빼려고 지하주차장에 들어가지 않습니다"),
             ),
-            carRisk = "물살이 30cm만 돼도 승용차가 떠내려갈 수 있어요 (미국 기상청)",
+            carRisk = "물살이 30cm만 돼도 승용차가 떠내려갈 수 있어요",
             primary = listOf(FLOOD, TRAPPED, MEDICAL, ROAD_BLOCKED, ROUTE_CLEAR),
             window = WindowAdvice.NO_ADVICE,
             blackout = false,
             sources = listOf(
                 official("국민행동요령 · 침수", "inundation"),
                 official("국민행동요령 · 호우", "heavyRain"),
-                Source("미국 기상청(NWS) Turn Around Don't Drown", "https://www.weather.gov/safety/flood-turn-around-dont-drown", SourceKind.FOREIGN_OFFICIAL),
+                Source("미국 기상청(NWS) Turn Around Don't Drown", "https://www.weather.gov/safety/flood-turn-around-dont-drown", SourceKind.FOREIGN_OFFICIAL, "미국 기상청"),
             ),
         ),
         DisasterGuide(
             type = DisasterType.TYPHOON,
-            headline = "속도를 줄이고 옆 차와 거리를 두세요. 침수 도로·교량은 피하세요",
             actions = listOf(
                 Step("속도를 줄이고 방어운전을 합니다"),
                 Step("돌풍에 밀릴 수 있으니 옆 차로의 차와 거리를 둡니다"),
@@ -182,7 +176,6 @@ object DisasterGuides {
         ),
         DisasterGuide(
             type = DisasterType.SNOW_COLD,
-            headline = "고립되면 차 안에서 기다리고, 배기구 주변 눈을 자주 치우세요",
             actions = listOf(
                 Step("고립되면 되도록 차 안에서 구조를 기다립니다"),
                 Step("함께 있는 사람과 체온을 나누고, 한 명은 꼭 깨어 있습니다"),
@@ -196,20 +189,19 @@ object DisasterGuides {
                 Step("모두 함께 잠들지 않습니다"),
                 Step("앞유리에 뜨거운 물을 붓지 않습니다"),
             ),
-            carRisk = "배기구가 눈에 막힌 채 시동을 켜 두면 일산화탄소 중독 위험이 있어요 (미국 기상청)",
+            carRisk = "배기구가 눈에 막힌 채 시동을 켜 두면 일산화탄소 중독 위험이 있어요",
             primary = listOf(COLD, TRAPPED, POWER, FOOD, MEDICAL),
             window = WindowAdvice.OPEN_A_LITTLE,
             blackout = false,
             sources = listOf(
                 official("국민행동요령 · 대설", "heavySnow"),
                 official("국민행동요령 · 한파", "coldWave"),
-                Source("서울시 대설 행동요령", "https://news.seoul.go.kr/safe/?p=21201", SourceKind.KOREA_LOCAL),
-                Source("미국 기상청(NWS) 겨울 폭풍 중", "https://www.weather.gov/safety/winter-during", SourceKind.FOREIGN_OFFICIAL),
+                Source("서울시 대설 행동요령", "https://news.seoul.go.kr/safe/?p=21201", SourceKind.KOREA_LOCAL, "서울시"),
+                Source("미국 기상청(NWS) 겨울 폭풍 중", "https://www.weather.gov/safety/winter-during", SourceKind.FOREIGN_OFFICIAL, "미국 기상청"),
             ),
         ),
         DisasterGuide(
             type = DisasterType.HEAT,
-            headline = "물을 자주 마시고, 어린이·어르신을 차에 혼자 두지 마세요",
             actions = listOf(
                 Step("물을 자주 마시고 카페인·술은 피합니다"),
                 Step("어지럽거나 두통·근육경련이 있으면 시원한 곳에서 쉽니다"),
@@ -222,12 +214,11 @@ object DisasterGuides {
             blackout = false,
             sources = listOf(
                 official("국민행동요령 · 폭염", "heatWave"),
-                Source("세계일보, 도로교통공단 차 실내 온도 측정 (2026.8.6)", "https://www.segye.com/newsView/20260806509056", SourceKind.NEWS),
+                Source("세계일보, 도로교통공단 차 실내 온도 측정 (2026.8.6)", "https://www.segye.com/newsView/20260806509056", SourceKind.NEWS, "도로교통공단"),
             ),
         ),
         DisasterGuide(
             type = DisasterType.CHEMICAL,
-            headline = "창문을 닫고 에어컨·히터를 끈 뒤 내기순환으로 바꾸세요",
             actions = listOf(
                 Step("창문을 닫고 에어컨·히터를 끕니다"),
                 Step("공조를 내기순환으로 바꿔 바깥 공기를 막습니다"),
@@ -245,12 +236,11 @@ object DisasterGuides {
             blackout = false,
             sources = listOf(
                 official("국민행동요령 · 화학사고", "chemicalAccidentDisaster"),
-                Source("도봉구 화학사고 행동요령", "https://www.dobong.go.kr/Contents.asp?code=10010083&tab=20", SourceKind.KOREA_LOCAL),
+                Source("도봉구 화학사고 행동요령", "https://www.dobong.go.kr/Contents.asp?code=10010083&tab=20", SourceKind.KOREA_LOCAL, "도봉구"),
             ),
         ),
         DisasterGuide(
             type = DisasterType.RADIATION,
-            headline = "차는 방사능을 막지 못해요. 가까운 콘크리트 건물 안으로 들어가세요",
             actions = listOf(
                 Step("실내 대피 안내를 받으면 바로 집이나 가까운 콘크리트 건물로 갑니다"),
                 Step("건물 안에서는 문·창문을 닫고 에어컨·환풍기를 끕니다"),
@@ -267,13 +257,12 @@ object DisasterGuides {
             blackout = false,
             sources = listOf(
                 official("국민행동요령 · 원전사고", "nuclearAccident"),
-                Source("경주시 방사능 방재", "https://www.gyeongju.go.kr/gersi/page.do?mnu_uid=4355", SourceKind.KOREA_LOCAL),
-                Source("미국 질병통제예방센터(CDC) 방사능 비상", "https://www.cdc.gov/radiation-emergencies/faq/index.html", SourceKind.FOREIGN_OFFICIAL),
+                Source("경주시 방사능 방재", "https://www.gyeongju.go.kr/gersi/page.do?mnu_uid=4355", SourceKind.KOREA_LOCAL, "경주시"),
+                Source("미국 질병통제예방센터(CDC) 방사능 비상", "https://www.cdc.gov/radiation-emergencies/faq/index.html", SourceKind.FOREIGN_OFFICIAL, "미국 질병통제예방센터"),
             ),
         ),
         DisasterGuide(
             type = DisasterType.AIR_RAID,
-            headline = "공습경보: 도로 오른쪽에 세우고 키를 둔 채 대피하세요. 밤에는 차 불빛을 모두 끄세요",
             actions = listOf(
                 Step("경계경보: 천천히 운행하고 고가도로·도심 진입을 피합니다"),
                 Step("공습경보: 빈터나 도로 오른쪽에 세우고 승객을 대피시킵니다"),
@@ -296,7 +285,6 @@ object DisasterGuides {
         ),
         DisasterGuide(
             type = DisasterType.TUNNEL,
-            headline = "갓길에 세우고 시동을 끈 뒤, 키를 꽂아 두고 연기 반대쪽으로 걸어서 나가세요",
             actions = listOf(
                 Step("갓길이나 비상주차대 쪽에 차를 세웁니다"),
                 Step("시동을 끄고 키를 꽂아 둔 채 내립니다"),
@@ -313,7 +301,6 @@ object DisasterGuides {
         ),
         DisasterGuide(
             type = DisasterType.LANDSLIDE,
-            headline = "속도를 줄이고 산사태 위험 구간은 돌아서 빨리 벗어나세요",
             actions = listOf(
                 Step("천천히 달리고 앞차와 거리를 둡니다"),
                 Step("산사태 위험 구간은 돌아가서 빨리 벗어납니다"),
@@ -329,7 +316,6 @@ object DisasterGuides {
         ),
         DisasterGuide(
             type = DisasterType.BLACKOUT,
-            headline = "신호등이 꺼지면 천천히 달리고, 경찰 등 안내자의 통제를 따르세요",
             actions = listOf(
                 Step("신호등이 꺼지면 경찰 등 안내자의 통제에 따라 침착하게 움직입니다"),
                 Step("재난방송을 듣습니다"),

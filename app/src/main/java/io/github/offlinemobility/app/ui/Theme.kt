@@ -9,6 +9,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -82,6 +83,12 @@ object Type {
     val body = 24.sp
     val meta = 20.sp
     val button = 26.sp
+
+    /**
+     * Line height for text that can wrap. Material's default (24 sp) is shorter than most of these
+     * sizes, so wrapped lines would touch or overlap.
+     */
+    fun lines(size: TextUnit): TextUnit = (size.value * 1.35f).sp
 }
 
 object Size {

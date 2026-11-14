@@ -78,7 +78,6 @@ import io.github.offlinemobility.app.core.cabin.WarmLevel
 import io.github.offlinemobility.app.core.disaster.DisasterGuide
 import io.github.offlinemobility.app.core.disaster.DisasterType
 import io.github.offlinemobility.app.core.disaster.WindowAdvice
-import io.github.offlinemobility.app.core.energy.Endurance
 import io.github.offlinemobility.app.core.light.Lamp
 import io.github.offlinemobility.app.core.online.OfficialAlert
 import io.github.offlinemobility.app.core.online.ShelterFinder
@@ -126,6 +125,8 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
     val c = LocalAppColors.current
     var overlay by remember { mutableStateOf(Overlay.NONE) }
     var pending by remember { mutableStateOf<RescueMessage?>(null) }
+    // True when the guide was opened from the situation list, so "이전" can go back to it.
+    var guideFromList by remember { mutableStateOf(false) }
     val now by produceState(System.currentTimeMillis()) {
         while (true) {
             delay(15_000)
@@ -138,7 +139,13 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
         overlay = Overlay.CONFIRM
     }
     // The back key closes an open sheet first instead of leaving the app.
-    BackHandler(enabled = overlay != Overlay.NONE) { overlay = Overlay.NONE }
+    BackHandler(enabled = overlay != Overlay.NONE) {
+        overlay = if (overlay == Overlay.GUIDE && guideFromList) Overlay.DISASTER else Overlay.NONE
+    }
+    val openGuide: () -> Unit = {
+        guideFromList = false
+        overlay = Overlay.GUIDE
+    }
 
     Box(Modifier.fillMaxSize().background(c.page)) {
         Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 20.dp)) {
@@ -152,12 +159,12 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 if (maxWidth > maxHeight) {
                     Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                        SendArea(state, actions, now, pick, onMore = { overlay = Overlay.MORE }, onGuide = { overlay = Overlay.GUIDE }, onKeepWarm = { overlay = Overlay.KEEP_WARM }, onRelay = { overlay = Overlay.RELAY }, Modifier.weight(1.15f).fillMaxHeight())
+                        SendArea(state, actions, now, pick, onMore = { overlay = Overlay.MORE }, onGuide = openGuide, onKeepWarm = { overlay = Overlay.KEEP_WARM }, onRelay = { overlay = Overlay.RELAY }, Modifier.weight(1.15f).fillMaxHeight())
                         InboxArea(state, actions, now, Modifier.weight(0.85f).fillMaxHeight())
                     }
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                        SendArea(state, actions, now, pick, onMore = { overlay = Overlay.MORE }, onGuide = { overlay = Overlay.GUIDE }, onKeepWarm = { overlay = Overlay.KEEP_WARM }, onRelay = { overlay = Overlay.RELAY }, Modifier.weight(0.58f).fillMaxWidth())
+                        SendArea(state, actions, now, pick, onMore = { overlay = Overlay.MORE }, onGuide = openGuide, onKeepWarm = { overlay = Overlay.KEEP_WARM }, onRelay = { overlay = Overlay.RELAY }, Modifier.weight(0.58f).fillMaxWidth())
                         InboxArea(state, actions, now, Modifier.weight(0.42f).fillMaxWidth())
                     }
                 }
@@ -183,11 +190,16 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
                 current = state.disaster,
                 onPick = {
                     actions.selectDisaster(it)
-                    overlay = if (it == DisasterType.GENERAL) Overlay.NONE else Overlay.GUIDE
+                    guideFromList = true
+                    overlay = Overlay.GUIDE
                 },
                 onClose = { overlay = Overlay.NONE },
             )
-            Overlay.GUIDE -> GuideSheet(state.guide, onClose = { overlay = Overlay.NONE })
+            Overlay.GUIDE -> GuideSheet(
+                state.guide,
+                onBack = if (guideFromList) ({ overlay = Overlay.DISASTER }) else null,
+                onClose = { overlay = Overlay.NONE },
+            )
             Overlay.SHELTERS -> ShelterSheet(state, now, onClose = { overlay = Overlay.NONE })
             Overlay.SETTINGS -> SettingsSheet(state, actions, onClose = { overlay = Overlay.NONE })
             Overlay.KEEP_WARM -> KeepWarmSheet(state, actions, onClose = { overlay = Overlay.NONE })
@@ -227,7 +239,7 @@ private fun Header(state: UiState, onShelters: () -> Unit, onDisaster: () -> Uni
             Spacer(Modifier.width(12.dp))
         }
         AppButton(
-            "상황: ${state.disaster.label}",
+            if (state.disaster == DisasterType.GENERAL) "행동요령" else "${state.disaster.label} 행동요령",
             onDisaster,
             Kind.SECONDARY,
             height = Size.secondaryButton,
@@ -249,15 +261,9 @@ private fun statusLine(state: UiState, c: AppColors): AnnotatedString = buildAnn
         if (state.gateway.online) item("통신 연결됨", c.safe) else item("통신 끊김 · 소리와 빛으로 보내요", c.help)
     }
     if (state.blackout) item("등화관제 중", c.help)
+    // Only what the car reports. Hours are estimates and appear where they help a decision (난방 아끼기 줄).
     state.endurance?.let { e ->
-        val warmHours = state.keepWarmEstimate?.takeIf { state.keepWarm.active }?.hours(state.keepWarm.level)
-        val source = if (e.isEv) "배터리" else "연료"
-        item(
-            if (warmHours != null) "$source ${e.percent}% · 난방 아끼는 중 · ${warmHoursWord(warmHours)} (추정)"
-            else "$source ${e.percent}% · 냉난방 없이 ${Endurance.hoursWord(e.hours)} (추정)",
-            if (e.low) c.help else c.mute,
-            strong = e.low,
-        )
+        item("${if (e.isEv) "배터리" else "연료"} ${e.percent}%", if (e.low) c.help else c.mute, strong = e.low)
     }
 }
 
@@ -300,10 +306,6 @@ private fun SendArea(
                     },
                     onDismiss = { actions.dismissAlert(alert.id) },
                 )
-                Spacer(Modifier.height(Size.gap))
-            }
-            if (state.disaster != DisasterType.GENERAL) {
-                GuideBanner(state.guide, onGuide)
                 Spacer(Modifier.height(Size.gap))
             }
             val endurance = state.endurance
@@ -448,11 +450,7 @@ private fun SendingPanel(state: UiState, actions: ScreenActions, onRelay: () -> 
             Spacer(Modifier.width(20.dp))
             Column {
                 Text(title, fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink)
-                Text(
-                    listOfNotNull(copy.title, peopleText(tx.people).takeIf { message.asksPeople }).joinToString(" · "),
-                    fontSize = Type.body,
-                    color = c.body,
-                )
+                Text(titleWithPeople(message, tx.people), fontSize = Type.body, color = c.body)
             }
         }
         Spacer(Modifier.height(28.dp))
@@ -678,8 +676,9 @@ private fun InboxCard(item: InboxItem, now: Long, myFix: Fix?, canReply: Boolean
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.Top) {
                 Text(
-                    listOfNotNull(copy.title, peopleText(item.frame.people).takeIf { item.frame.message.asksPeople }).joinToString(" · "),
+                    titleWithPeople(item.frame.message, item.frame.people),
                     fontSize = Type.title,
+                    lineHeight = Type.lines(Type.title),
                     fontWeight = FontWeight.Bold,
                     color = c.ink,
                     modifier = Modifier.weight(1f),
@@ -701,16 +700,17 @@ private fun InboxCard(item: InboxItem, now: Long, myFix: Fix?, canReply: Boolean
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                listOfNotNull(
-                    if (fromServer) "구조 서버에서 받음 · 차량 ${item.confirmations}대가 알림" else routeText(item.frame.hop),
-                    "내 차도 이어서 전달했어요".takeIf { item.relayState == RelayState.SENT },
-                    "구조 서버로 전달했어요".takeIf { item.forwarded && !fromServer },
-                ).joinToString(" · ").keepWords(),
-                fontSize = Type.meta,
-                color = c.body,
+            // How it got here. A server item says nothing about the route; only a count of two or more
+            // reporting cars adds anything.
+            val route = listOfNotNull(
+                if (fromServer) "차량 ${item.confirmations}대가 알림".takeIf { item.confirmations >= 2 } else routeText(item.frame.hop),
+                "내 차도 이어서 전달했어요".takeIf { item.relayState == RelayState.SENT },
+                "구조 서버로 전달했어요".takeIf { item.forwarded && !fromServer },
             )
+            if (route.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                Text(route.joinToString(" · ").keepWords(), fontSize = Type.meta, color = c.body)
+            }
             if (item.frame.message != RescueMessage.ACK && !fromServer) {
                 Spacer(Modifier.height(14.dp))
                 if (item.acknowledged) {
@@ -739,10 +739,10 @@ internal fun SheetScrim(onDismiss: () -> Unit, content: @Composable () -> Unit) 
 }
 
 @Composable
-internal fun Sheet(width: Dp = 820.dp, content: @Composable ColumnScope.() -> Unit) {
+internal fun Sheet(width: Dp = 820.dp, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalAppColors.current
     Column(
-        Modifier.widthIn(max = width).fillMaxWidth(0.92f).clip(RoundedCornerShape(24.dp)).background(c.canvas)
+        Modifier.widthIn(max = width).fillMaxWidth(0.92f).then(modifier).clip(RoundedCornerShape(24.dp)).background(c.canvas)
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
             .padding(32.dp),
         content = content,
@@ -1053,7 +1053,7 @@ private fun Banner(icon: ImageVector, text: String, color: Color, background: Co
     ) {
         Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(32.dp))
         Spacer(Modifier.width(14.dp))
-        Text(text.keepWords(), fontSize = Type.body, fontWeight = FontWeight.SemiBold, color = LocalAppColors.current.ink)
+        Text(text.keepWords(), fontSize = Type.body, lineHeight = Type.lines(Type.body), fontWeight = FontWeight.SemiBold, color = LocalAppColors.current.ink)
     }
 }
 
@@ -1112,110 +1112,135 @@ private fun whereText(frame: RescueFrame, myFix: Fix?): String? {
 
 // ---------------------------------------------------------------- disaster
 
+/** The situation list and the guide share one fixed frame, so moving between them or between situations never resizes it. */
 @Composable
-private fun GuideBanner(guide: DisasterGuide, onClick: () -> Unit) {
-    val c = LocalAppColors.current
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = 88.dp).clip(RoundedCornerShape(Size.radius)).background(c.helpSoft)
-            .clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(guide.type.icon, contentDescription = null, tint = c.help, modifier = Modifier.size(40.dp))
-        Spacer(Modifier.width(16.dp))
-        Text(guide.headline.keepWords(), fontSize = Type.body, fontWeight = FontWeight.SemiBold, color = c.ink, modifier = Modifier.weight(1f))
-        Spacer(Modifier.width(12.dp))
-        Text("행동요령 ›", fontSize = Type.body, fontWeight = FontWeight.Bold, color = c.help)
-    }
+private fun GuideFrame(content: @Composable ColumnScope.() -> Unit) {
+    Sheet(width = 1500.dp, modifier = Modifier.fillMaxHeight(0.9f), content = content)
 }
 
 @Composable
 private fun DisasterSheet(current: DisasterType, onPick: (DisasterType) -> Unit, onClose: () -> Unit) {
     val c = LocalAppColors.current
     SheetScrim(onClose) {
-        Sheet(width = 1200.dp) {
+        GuideFrame {
             Text("지금 어떤 상황인가요?", fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink)
-            Text("고르면 그 상황에 맞는 행동요령과 메시지를 먼저 보여 줘요", fontSize = Type.body, color = c.body)
-            Spacer(Modifier.height(20.dp))
-            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
-                DisasterType.entries.chunked(4).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
+            Text("고르면 그 상황의 행동요령을 보여 주고, 첫 화면 메시지도 상황에 맞게 바꿔요", fontSize = Type.body, color = c.body)
+            Spacer(Modifier.height(24.dp))
+            Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Size.gap)) {
+                DisasterType.entries.chunked(SITUATION_COLUMNS).forEach { row ->
+                    Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
                         row.forEach { type ->
                             val selected = type == current
                             Column(
-                                Modifier.weight(1f).heightIn(min = 120.dp).clip(RoundedCornerShape(Size.radius))
+                                Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(Size.radius))
                                     .background(if (selected) c.accentSoft else c.canvas)
                                     .border(if (selected) 2.dp else 1.dp, if (selected) c.accent else c.line, RoundedCornerShape(Size.radius))
                                     .clickable { onPick(type) }.padding(16.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.Center,
                             ) {
-                                Icon(type.icon, contentDescription = null, tint = if (selected) c.accent else c.body, modifier = Modifier.size(48.dp))
-                                Spacer(Modifier.height(8.dp))
+                                Icon(type.icon, contentDescription = null, tint = if (selected) c.accent else c.body, modifier = Modifier.size(56.dp))
+                                Spacer(Modifier.height(12.dp))
                                 Text(type.label, fontSize = Type.body, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1)
                             }
                         }
-                        repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                        repeat(SITUATION_COLUMNS - row.size) { Spacer(Modifier.weight(1f)) }
                     }
-                    Spacer(Modifier.height(Size.gap))
                 }
             }
+            Spacer(Modifier.height(24.dp))
             AppButton("닫기", onClose, Kind.SECONDARY, Modifier.fillMaxWidth())
         }
     }
 }
 
+private const val SITUATION_COLUMNS = 4
+
 @Composable
-private fun GuideSheet(guide: DisasterGuide, onClose: () -> Unit) {
+private fun GuideSheet(guide: DisasterGuide, onBack: (() -> Unit)?, onClose: () -> Unit) {
     val c = LocalAppColors.current
     SheetScrim(onClose) {
-        Sheet(width = 1100.dp) {
+        GuideFrame {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(guide.type.icon, contentDescription = null, tint = c.help, modifier = Modifier.size(52.dp))
                 Spacer(Modifier.width(16.dp))
                 Text("${guide.type.label} 행동요령", fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink)
             }
-            Spacer(Modifier.height(16.dp))
-            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
-                SectionTitle("이렇게 하세요")
-                guide.actions.forEachIndexed { i, step ->
-                    GuideLine("${i + 1}", step.text, c.ink, step.foreign)
-                }
-                if (guide.avoid.isNotEmpty()) {
-                    SectionTitle("하지 마세요")
-                    guide.avoid.forEach { GuideLine("✕", it.text, c.urgent, it.foreign) }
-                }
-                guide.carRisk?.let {
-                    SectionTitle("차에서 조심할 점")
-                    Text(it.keepWords(), fontSize = Type.body, color = c.ink, modifier = Modifier.padding(vertical = 6.dp))
-                }
-                SectionTitle("출처")
-                guide.sources.forEach {
-                    Text("${it.kind.label} · ${it.name}", fontSize = Type.meta, color = c.mute)
-                }
-                if ((guide.actions + guide.avoid).any { it.foreign }) {
-                    Spacer(Modifier.height(6.dp))
-                    Text("(해외) 표시는 국내 공식 지침이 없어 해외 정부 자료를 옮긴 내용이에요", fontSize = Type.meta, color = c.mute)
+            Spacer(Modifier.height(8.dp))
+            // Wide screens: what to do on the left, what to avoid on the right (one column when there is nothing
+            // to put on the right). Each side scrolls on its own if it ever overflows.
+            val hasRight = guide.avoid.isNotEmpty() || guide.carRisk != null
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                if (maxWidth >= 1000.dp && hasRight) {
+                    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(48.dp)) {
+                        Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())) { GuideDo(guide) }
+                        Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())) { GuideDont(guide) }
+                    }
+                } else {
+                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                        GuideDo(guide)
+                        GuideDont(guide)
+                    }
                 }
             }
+            Spacer(Modifier.height(16.dp))
+            Text("출처: ${guide.sources.map { it.org }.distinct().joinToString(", ")}", fontSize = Type.meta, color = c.mute)
             Spacer(Modifier.height(20.dp))
-            AppButton("닫기", onClose, Kind.SECONDARY, Modifier.fillMaxWidth())
+            Row(horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
+                if (onBack != null) AppButton("이전", onBack, Kind.SECONDARY, Modifier.weight(1f))
+                AppButton("닫기", onClose, Kind.SECONDARY, Modifier.weight(1f))
+            }
         }
     }
 }
 
+// The guide is read under stress, often by older people, and the frame has room: larger type than other sheets.
 @Composable
-internal fun GuideLine(mark: String, text: String, markColor: Color, foreign: Boolean) {
+private fun GuideDo(guide: DisasterGuide) {
     val c = LocalAppColors.current
-    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.Top) {
-        Box(Modifier.size(40.dp).clip(CircleShape).background(c.surface), contentAlignment = Alignment.Center) {
-            Text(mark, fontSize = Type.meta, fontWeight = FontWeight.Bold, color = markColor)
+    GuideSection("이렇게 하세요")
+    guide.actions.forEachIndexed { i, step -> GuideLine("${i + 1}", step.text, c.ink, large = true) }
+}
+
+@Composable
+private fun GuideDont(guide: DisasterGuide) {
+    val c = LocalAppColors.current
+    if (guide.avoid.isNotEmpty()) {
+        GuideSection("하지 마세요")
+        guide.avoid.forEach { GuideLine("✕", it.text, c.urgent, large = true) }
+    }
+    guide.carRisk?.let {
+        GuideSection("차에서 조심할 점")
+        GuideLine("!", it, c.help, large = true)
+    }
+}
+
+@Composable
+private fun GuideSection(text: String) {
+    Text(
+        text,
+        fontSize = Type.body,
+        fontWeight = FontWeight.SemiBold,
+        color = LocalAppColors.current.mute,
+        modifier = Modifier.padding(top = 24.dp, bottom = 6.dp),
+    )
+}
+
+@Composable
+internal fun GuideLine(mark: String, text: String, markColor: Color, large: Boolean = false) {
+    val c = LocalAppColors.current
+    Row(Modifier.fillMaxWidth().padding(vertical = if (large) 10.dp else 8.dp), verticalAlignment = Alignment.Top) {
+        Box(Modifier.size(if (large) 48.dp else 40.dp).clip(CircleShape).background(c.surface), contentAlignment = Alignment.Center) {
+            Text(mark, fontSize = if (large) Type.body else Type.meta, fontWeight = FontWeight.Bold, color = markColor)
         }
-        Spacer(Modifier.width(14.dp))
+        Spacer(Modifier.width(if (large) 18.dp else 14.dp))
+        val size = if (large) Type.title else Type.body
         Text(
-            (if (foreign) "$text (해외)" else text).keepWords(),
-            fontSize = Type.body,
+            text.keepWords(),
+            fontSize = size,
+            lineHeight = Type.lines(size),
             color = c.ink,
-            modifier = Modifier.padding(top = 4.dp),
+            modifier = Modifier.padding(top = if (large) 2.dp else 4.dp),
         )
     }
 }
@@ -1236,7 +1261,7 @@ private fun AlertBanner(alert: OfficialAlert, current: DisasterType, onAccept: (
             Text("재난문자", fontSize = Type.body, fontWeight = FontWeight.Bold, color = c.urgent)
         }
         Spacer(Modifier.height(8.dp))
-        Text(alert.text.keepWords(), fontSize = Type.body, color = c.ink, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        Text(alert.text.keepWords(), fontSize = Type.body, lineHeight = Type.lines(Type.body), color = c.ink, maxLines = 3, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(14.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
             AppButton("닫기", onDismiss, Kind.SECONDARY, Modifier.weight(1f), height = 64.dp)
