@@ -1,5 +1,6 @@
 package io.github.offlinemobility.app.core.online
 
+import io.github.offlinemobility.app.core.disaster.DisasterGuides
 import io.github.offlinemobility.app.core.disaster.DisasterType
 import io.github.offlinemobility.app.core.protocol.Geo
 import io.github.offlinemobility.app.core.protocol.GeoCell
@@ -55,7 +56,7 @@ object OnlineJson {
                 val body = o.optString("text").take(500)
                 val created = o.optLong("createdAt", -1)
                 if (id.isEmpty() || body.isEmpty() || created <= 0) return@mapNotNull null
-                val type = o.optString("type").let { name -> DisasterType.entries.firstOrNull { it.name == name } }
+                val type = DisasterGuides.stageOf(o.optString("type").ifEmpty { null }, body)
                 OfficialAlert(id, created, body, o.optString("level").take(20).ifEmpty { null }, type)
             },
         )
@@ -122,17 +123,11 @@ object OnlineJson {
 
 object ShelterFinder {
     /**
-     * Word in [Shelter.kind] for the shelters meant for a disaster: an underground civil defence
-     * shelter in an air raid, an open assembly point after an earthquake, a staffed rest area in
-     * extreme cold or heat. Null when any shelter will do.
+     * Word in [Shelter.kind] for the shelters to show first. In a war the underground
+     * 민방위대피소, built for air raids, come first whatever the alert stage.
      */
-    fun preferredKind(disaster: DisasterType): String? = when (disaster) {
-        DisasterType.AIR_RAID -> "민방위"
-        DisasterType.EARTHQUAKE -> "지진옥외"
-        DisasterType.SNOW_COLD -> "한파"
-        DisasterType.HEAT -> "무더위"
-        else -> null
-    }
+    @Suppress("UNUSED_PARAMETER")
+    fun preferredKind(disaster: DisasterType): String = CivilShelters.KIND
 
     /**
      * Nearest shelters with distance and bearing from the given point. Shelters whose kind contains

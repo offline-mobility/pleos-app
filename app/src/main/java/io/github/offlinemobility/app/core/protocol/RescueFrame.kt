@@ -11,7 +11,7 @@ enum class RescueMessage(val code: Int, val title: String, val critical: Boolean
     HAZARD(4, "가스·위험물 누출", true),
     FLOOD(5, "침수 위험", true),
     VULNERABLE(6, "노약자·어린이 동승", false),
-    WATER(7, "식수 필요", false),
+    WATER(7, "식수·식량 필요", false),
     POWER(8, "연료·전력 부족", false),
     ROAD_BLOCKED(9, "전방 도로 차단", false),
     ROUTE_CLEAR(10, "통행 가능 경로", false),
@@ -21,7 +21,7 @@ enum class RescueMessage(val code: Int, val title: String, val critical: Boolean
     ACK(14, "수신 확인", false),
     COLD(15, "추위·저체온 위험", true),
     COLLAPSE(16, "붕괴·낙석", true),
-    CBRN(17, "화생방·방사능 경보", true),
+    CBRN(17, "화생방", true),
     FOOD(18, "식량 필요", false),
     MEDICINE(19, "약 필요", false),
     ;
@@ -30,11 +30,16 @@ enum class RescueMessage(val code: Int, val title: String, val critical: Boolean
         fun fromCode(code: Int): RescueMessage? = entries.firstOrNull { it.code == code }
 
         /**
-         * No longer offered for sending: unclear to people (which road is "passable"?) or already
-         * covered (shelters are on screen; a collapse is "고립됨" or "앞길 막힘"). Still decoded when
-         * an older version sends them, so their codes stay reserved.
+         * The eight messages people can send, in screen order, for one scene: a war evacuation
+         * stuck in traffic with networks down. 식수 also stands for 식량.
          */
-        val RETIRED: Set<RescueMessage> = setOf(ROUTE_CLEAR, SHELTER, COLLAPSE, RESCUE_TEAM)
+        val OFFERED: List<RescueMessage> = listOf(POWER, WATER, MEDICAL, COLD, MEDICINE, SOS, CBRN, FIRE)
+
+        /**
+         * Everything else (except the reply [ACK]) is no longer sent. Still decoded when an older
+         * version sends it, so the codes stay reserved.
+         */
+        val RETIRED: Set<RescueMessage> = entries.toSet() - OFFERED.toSet() - ACK
     }
 }
 

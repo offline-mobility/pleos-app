@@ -15,14 +15,14 @@ class OnlineJsonTest {
     fun alertsParseAndUnknownTypeIsNull() {
         val result = OnlineJson.alerts(
             """{"source":"live","alerts":[
-              {"id":"1","createdAt":1794000000000,"text":"대설경보 발효","level":"긴급재난","type":"SNOW_COLD"},
+              {"id":"1","createdAt":1794000000000,"text":"공습경보 발령","level":"긴급재난","type":"AIR_RAID"},
               {"id":"2","createdAt":1794000000001,"text":"실종자를 찾습니다","type":null},
               {"id":"3","createdAt":1794000000002,"text":"x","type":"NOT_A_TYPE"},
               {"id":"","createdAt":1,"text":"no id"}, {"id":"5","text":"no time"}, "garbage"
             ]}""",
         )!!
         assertEquals("live", result.source)
-        assertEquals(listOf(DisasterType.SNOW_COLD, null, null), result.items.map { it.type })
+        assertEquals(listOf(DisasterType.AIR_RAID, null, null), result.items.map { it.type })
     }
 
     @Test
@@ -43,7 +43,7 @@ class OnlineJsonTest {
     }
 
     @Test
-    fun sheltersForTheCurrentDisasterComeFirstHoweverFar() {
+    fun civilDefenceSheltersComeFirstHoweverFarInEveryAlertStage() {
         fun shelter(name: String, kind: String, lat: Double) = Shelter(name, name, kind, lat, 127.0, "", null)
         val all = listOf(
             shelter("경로당", "한파쉼터,무더위쉼터", 37.5001),
@@ -51,14 +51,10 @@ class OnlineJsonTest {
             shelter("지하주차장", "민방위대피소", 37.5200),
             shelter("지하상가", "민방위대피소", 37.5100),
         )
-        fun names(disaster: DisasterType) =
-            ShelterFinder.nearest(all, 37.5, 127.0, 3, ShelterFinder.preferredKind(disaster)).map { it.first.name }
-
-        assertEquals(listOf("경로당", "운동장", "지하상가"), names(DisasterType.GENERAL))
-        assertEquals(listOf("지하상가", "지하주차장", "경로당"), names(DisasterType.AIR_RAID))
-        assertEquals(listOf("운동장", "경로당", "지하상가"), names(DisasterType.EARTHQUAKE))
-        assertEquals(listOf("경로당", "운동장", "지하상가"), names(DisasterType.SNOW_COLD))
-        assertEquals("경로당", names(DisasterType.HEAT).first())
+        for (stage in DisasterType.entries) {
+            val names = ShelterFinder.nearest(all, 37.5, 127.0, 3, ShelterFinder.preferredKind(stage)).map { it.first.name }
+            assertEquals(stage.name, listOf("지하상가", "지하주차장", "경로당"), names)
+        }
     }
 
     @Test

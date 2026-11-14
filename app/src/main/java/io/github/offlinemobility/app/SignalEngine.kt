@@ -194,7 +194,7 @@ data class UiState(
     val locationPermission: Boolean = false,
     /** Attach the car's position to outgoing messages. */
     val shareLocation: Boolean = true,
-    val disaster: DisasterType = DisasterType.GENERAL,
+    val disaster: DisasterType = DisasterType.EVACUATION,
     /** Plain Morse SOS beeps after critical data frames, for people without the app. */
     val audibleSos: Boolean = true,
     /** Read received messages aloud. */

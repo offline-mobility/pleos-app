@@ -42,7 +42,7 @@ import kotlin.math.roundToInt
 /** Offered while parked in a car whose heater the app can control; not in a heat wave. */
 internal fun showKeepWarm(state: UiState): Boolean =
     state.keepWarm.active ||
-        (state.keepWarmEstimate != null && state.gear == GearState.PARK && state.disaster != DisasterType.HEAT)
+        (state.keepWarmEstimate != null && state.gear == GearState.PARK)
 
 /** "약 22시간" / "약 3일" / "1시간 미만". Hours are kept up to three days so two plans can be compared. */
 internal fun warmHoursWord(hours: Double): String = when {

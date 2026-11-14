@@ -55,7 +55,7 @@ val RescueMessage.copy: MessageCopy
         RescueMessage.FLOOD -> MessageCopy("침수", Icons.Filled.Flood, Tone.URGENT)
         RescueMessage.HAZARD -> MessageCopy("가스·위험물", Icons.Filled.Warning, Tone.URGENT)
         RescueMessage.VULNERABLE -> MessageCopy("노약자·어린이", Icons.Filled.Elderly, Tone.HELP)
-        RescueMessage.WATER -> MessageCopy("식수 필요", Icons.Filled.WaterDrop, Tone.HELP)
+        RescueMessage.WATER -> MessageCopy("식수·식량 필요", Icons.Filled.WaterDrop, Tone.HELP)
         RescueMessage.POWER -> MessageCopy("연료·전력 부족", Icons.Filled.LocalGasStation, Tone.HELP)
         RescueMessage.ROAD_BLOCKED -> MessageCopy("앞길 막힘", Icons.Filled.Block, Tone.HELP)
         RescueMessage.ROUTE_CLEAR -> MessageCopy("지나갈 수 있음", Icons.Filled.AltRoute, Tone.SAFE)
@@ -65,22 +65,10 @@ val RescueMessage.copy: MessageCopy
         RescueMessage.ACK -> MessageCopy("잘 받았어요", Icons.Filled.Done, Tone.NEUTRAL)
         RescueMessage.COLD -> MessageCopy("추위·저체온", Icons.Filled.AcUnit, Tone.URGENT)
         RescueMessage.COLLAPSE -> MessageCopy("붕괴·낙석", Icons.Filled.Landslide, Tone.URGENT)
-        RescueMessage.CBRN -> MessageCopy("화생방·방사능", Icons.Filled.Masks, Tone.URGENT)
+        RescueMessage.CBRN -> MessageCopy("화생방", Icons.Filled.Masks, Tone.URGENT)
         RescueMessage.FOOD -> MessageCopy("식량 필요", Icons.Filled.Restaurant, Tone.HELP)
         RescueMessage.MEDICINE -> MessageCopy("약 필요", Icons.Filled.Medication, Tone.HELP)
     }
-
-/** Message groups for the "다른 상황" sheet; messages already on the first screen are left out. */
-private val AllGroups = listOf(
-    "위험" to listOf(RescueMessage.FIRE, RescueMessage.FLOOD, RescueMessage.HAZARD, RescueMessage.CBRN),
-    "사람" to listOf(RescueMessage.MEDICAL, RescueMessage.TRAPPED, RescueMessage.VULNERABLE, RescueMessage.COLD, RescueMessage.MEDICINE),
-    "물자" to listOf(RescueMessage.WATER, RescueMessage.FOOD, RescueMessage.POWER),
-    "길" to listOf(RescueMessage.ROAD_BLOCKED),
-    "안전" to listOf(RescueMessage.ALL_SAFE),
-)
-
-fun moreGroups(primary: List<RescueMessage>): List<Pair<String, List<RescueMessage>>> =
-    AllGroups.map { (name, list) -> name to list.filter { it !in primary } }.filter { it.second.isNotEmpty() }
 
 /**
  * Icon colour on the receiving side: red picks out urgent requests in the list, everything else is
