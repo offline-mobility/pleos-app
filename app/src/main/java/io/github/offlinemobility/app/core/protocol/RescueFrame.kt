@@ -28,6 +28,13 @@ enum class RescueMessage(val code: Int, val title: String, val critical: Boolean
 
     companion object {
         fun fromCode(code: Int): RescueMessage? = entries.firstOrNull { it.code == code }
+
+        /**
+         * No longer offered for sending: unclear to people (which road is "passable"?) or already
+         * covered (shelters are on screen; a collapse is "고립됨" or "앞길 막힘"). Still decoded when
+         * an older version sends them, so their codes stay reserved.
+         */
+        val RETIRED: Set<RescueMessage> = setOf(ROUTE_CLEAR, SHELTER, COLLAPSE, RESCUE_TEAM)
     }
 }
 

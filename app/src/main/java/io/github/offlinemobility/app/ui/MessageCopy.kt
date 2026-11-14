@@ -72,11 +72,11 @@ val RescueMessage.copy: MessageCopy
 
 /** Message groups for the "다른 상황" sheet; messages already on the first screen are left out. */
 private val AllGroups = listOf(
-    "위험" to listOf(RescueMessage.FIRE, RescueMessage.FLOOD, RescueMessage.HAZARD, RescueMessage.COLLAPSE, RescueMessage.CBRN),
+    "위험" to listOf(RescueMessage.FIRE, RescueMessage.FLOOD, RescueMessage.HAZARD, RescueMessage.CBRN),
     "사람" to listOf(RescueMessage.MEDICAL, RescueMessage.TRAPPED, RescueMessage.VULNERABLE, RescueMessage.COLD, RescueMessage.MEDICINE),
     "물자" to listOf(RescueMessage.WATER, RescueMessage.FOOD, RescueMessage.POWER),
-    "길·대피" to listOf(RescueMessage.ROAD_BLOCKED, RescueMessage.ROUTE_CLEAR, RescueMessage.SHELTER),
-    "안전" to listOf(RescueMessage.RESCUE_TEAM, RescueMessage.ALL_SAFE),
+    "길" to listOf(RescueMessage.ROAD_BLOCKED),
+    "안전" to listOf(RescueMessage.ALL_SAFE),
 )
 
 fun moreGroups(primary: List<RescueMessage>): List<Pair<String, List<RescueMessage>>> =

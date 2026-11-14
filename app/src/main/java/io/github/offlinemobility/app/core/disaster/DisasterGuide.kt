@@ -68,7 +68,8 @@ data class DisasterGuide(
      * that is not already there, or [FIRST_SCREEN_SPARE] when it has none.
      */
     val firstScreen: List<RescueMessage>
-        get() = FIRST_SCREEN_FIXED + (primary.firstOrNull { it !in FIRST_SCREEN_FIXED } ?: FIRST_SCREEN_SPARE)
+        get() = FIRST_SCREEN_FIXED +
+            (primary.firstOrNull { it !in FIRST_SCREEN_FIXED && it !in RescueMessage.RETIRED } ?: FIRST_SCREEN_SPARE)
 
     companion object {
         /**

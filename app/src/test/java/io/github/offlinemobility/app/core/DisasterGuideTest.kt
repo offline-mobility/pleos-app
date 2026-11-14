@@ -40,10 +40,12 @@ class DisasterGuideTest {
             assertEquals(guide.type.name, 8, first.distinct().size)
             assertEquals(guide.type.name, fixed, first.take(7))
             assertTrue(guide.type.name, RescueMessage.ACK !in first)
+            assertTrue(guide.type.name, first.none { it in RescueMessage.RETIRED })
         }
         fun situationCell(type: DisasterType) = DisasterGuides.of(type).firstScreen.last()
         assertEquals(RescueMessage.COLD, situationCell(DisasterType.GENERAL))
-        assertEquals(RescueMessage.COLLAPSE, situationCell(DisasterType.EARTHQUAKE))
+        assertEquals(RescueMessage.ROAD_BLOCKED, situationCell(DisasterType.EARTHQUAKE))
+        assertEquals(RescueMessage.CBRN, situationCell(DisasterType.AIR_RAID))
         assertEquals(RescueMessage.VULNERABLE, situationCell(DisasterType.HEAT))
         assertEquals(RescueMessage.CBRN, situationCell(DisasterType.CHEMICAL))
         assertEquals(RescueMessage.MEDICINE, situationCell(DisasterType.BLACKOUT))
