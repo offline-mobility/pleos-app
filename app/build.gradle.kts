@@ -86,19 +86,29 @@ abstract class CopyCivilShelters : DefaultTask() {
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val source: RegularFileProperty
 
+    /** Pharmacies, hospitals and stores, one .tsv per kind (refreshed with `npm run update-facilities`). */
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.NAME_ONLY)
+    abstract val facilities: DirectoryProperty
+
     @get:OutputDirectory
     abstract val outputDir: DirectoryProperty
 
     @TaskAction
     fun copy() {
-        val target = outputDir.get().asFile.resolve("civil-shelters.json")
-        target.parentFile.mkdirs()
-        source.get().asFile.copyTo(target, overwrite = true)
+        val out = outputDir.get().asFile
+        out.deleteRecursively()
+        out.mkdirs()
+        source.get().asFile.copyTo(out.resolve("civil-shelters.json"), overwrite = true)
+        facilities.get().asFile.listFiles { f -> f.extension == "tsv" }.orEmpty().forEach {
+            it.copyTo(out.resolve("facilities/${it.name}"), overwrite = true)
+        }
     }
 }
 
 val copyCivilShelters = tasks.register<CopyCivilShelters>("copyCivilShelters") {
     source.set(rootProject.layout.projectDirectory.file("server/data/civil-shelters.json"))
+    facilities.set(rootProject.layout.projectDirectory.dir("server/data/facilities"))
     outputDir.set(layout.buildDirectory.dir("generated/civilShelters"))
 }
 
@@ -111,6 +121,7 @@ androidComponents {
 dependencies {
     implementation(libs.vehicle.sdk)
     implementation(libs.tts.sdk)
+    implementation(libs.navi.helper.sdk)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

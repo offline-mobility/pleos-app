@@ -7,7 +7,8 @@
 - **음향 데이터 통신:** 구조 메시지 8종, 탑승 인원, GPS 위치(약 40m)를 차량 스피커로 3.3초 프레임에 실어 보냅니다. 수신 차량은 마이크로 받아 "응급 환자 2명, 북동쪽 약 300m"처럼 표시합니다.
 - **조난 점멸:** 차량이 지원하는 외부 조명을 골라 SOS(USCG 46 CFR 161.013-7 타이밍), 국제 산악 조난 신호(분당 6회), 응답 신호(분당 3회)를 보냅니다. 후방 안개등이 없는 차량은 하향등과 상향등을 함께 점멸합니다.
 - **차량 간 중계:** 최대 3홉까지 중계하고, 같은 메시지는 한 번만 보냅니다. 분당 6회로 제한해 가짜 신호가 증폭되지 않게 합니다.
-- **민방위 경보 4단계:** 피난 중·경계경보·공습경보·화생방경보별 차 안 행동요령(행정안전부 국민행동요령)을 오프라인으로 보여 주고, 공습경보에는 등화관제, 화생방경보에는 외기 차단을 켭니다.
+- **상황별 행동요령 9개:** 민방위 경보 4단계(피난 중·경계경보·공습경보·화생방경보)와 대설·한파, 호우·침수, 지진, 산불, 태풍·강풍의 차 안 행동요령(행정안전부 국민행동요령)을 오프라인으로 보여 주고, 공습경보에는 차가 조명을 모두 끄고(등화관제), 화생방경보에는 창문을 닫고 공조를 내기순환으로 바꿉니다(외기 차단).
+- **주변 시설:** 전국 민방위대피소 1.7만 곳, 약국 2.6만 곳, 종합병원 384곳, 편의점 5.6만 곳을 앱에 넣어 통신 없이 가까운 순으로 보여 주고, 차 내비로 길 안내를 넘깁니다.
 - **사람에게 직접 알리기:** 위급 메시지 뒤에 사람이 알아듣는 SOS 소리를 붙이고, 받은 신호를 음성으로 읽어 줍니다.
 - **차량 에너지:** 배터리·연료 잔량으로 신호 지속 시간을 추정하고, 부족하면 불빛을 끄도록 안내합니다.
 - **난방 아끼며 버티기:** 전기차에서 구조를 기다리는 동안 히터를 낮은 온도로 돌리고 시트·핸들 열선으로 보완해 배터리 사용 시간을 늘립니다. P단에서 사용자가 시작했을 때만 제어하고, 멈추거나 P단을 벗어나면 원래 공조 설정으로 되돌립니다.
@@ -47,8 +48,8 @@ cd server && cp .env.example .env && npm run dev   # http://localhost:8787
 | IDE | Android Studio 최신 버전, JDK 17 |
 | SDK | compileSdk 35, minSdk 28 |
 | 에뮬레이터 | Pleos Connect Emulator v2.1.0 (API 34, Cold boot, RAM 4GB). 설치 방법은 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
-| 차량 SDK | Pleos Vehicle SDK 2.3.2 (`ai.pleos.playground:Vehicle`) |
-| 권한 | 최초 실행 시 마이크·위치·알림 허용. Pleos: `CAR_LIGHTS`, `CONTROL_CAR_LIGHTS`, `CAR_DRIVE`, `CAR_ENERGY`, `CAR_CLIMATE`, `CONTROL_CAR_CLIMATE`, `CAR_SEATS`, `CONTROL_CAR_SEATS`, `TTS_SERVICE` |
+| 차량 SDK | Pleos Vehicle SDK 2.3.2 (`ai.pleos.playground:Vehicle`), NaviHelper SDK 3.0.5, TextToSpeech SDK 3.3.1 |
+| 권한 | 최초 실행 시 마이크·위치·알림 허용. Pleos: `CAR_LIGHTS`, `CONTROL_CAR_LIGHTS`, `CAR_DRIVE`, `CAR_ENERGY`, `CAR_CLIMATE`, `CONTROL_CAR_CLIMATE`, `CAR_SEATS`, `CONTROL_CAR_SEATS`, `CAR_WINDOWS`, `CONTROL_CAR_WINDOWS`, `NAVI_ROUTE_SEARCH`, `TTS_SERVICE` |
 
 **에뮬레이터에서 확인하는 방법**
 1. 에뮬레이터를 실행하고 `adb forward tcp:8088 tcp:8088` 후 `http://127.0.0.1:8088/`에서 Virtual Console을 엽니다.
@@ -74,9 +75,9 @@ app/src/main/java/.../
   core/light/      SOS·조난 비컨·응답·위치 유도 점멸 패턴
   core/relay/      중복 억제, 홉 제한, 무작위 백오프
   core/safety/     P단 송신 잠금
-  vehicle/         Pleos Vehicle SDK 연동(Light, Gear, EvBattery, HVAC, Seat, SteeringWheel), 조명 패턴·난방 계획 실행과 복원
+  vehicle/         Pleos Vehicle SDK 연동(Light, Gear, EvBattery, Fuel, HVAC, Seat, SteeringWheel, Window)과 NaviHelper SDK(대피소 길 안내), 조명 패턴·난방 계획·등화관제·외기 차단 실행과 복원
   ui/              화면, 색·글자 기준, 메시지·재난 문구
-  core/disaster/   민방위 경보 4단계 행동요령과 앱 동작
+  core/disaster/   상황 9개(민방위 경보 4단계, 자연재난 5종) 행동요령과 앱 동작
   core/energy/     배터리·연료 기반 지속 시간 추정
   core/cabin/      난방 절약 계획: 버틸 수 있는 시간 추정, 히터·환기 주기 판단
   core/gateway/    구조 서버 전송 형식, QR 전달 주소

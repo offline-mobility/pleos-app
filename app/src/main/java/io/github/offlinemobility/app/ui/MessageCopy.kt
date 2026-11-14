@@ -48,7 +48,7 @@ val RescueMessage.asksPeople: Boolean
 
 val RescueMessage.copy: MessageCopy
     get() = when (this) {
-        RescueMessage.SOS -> MessageCopy("SOS 긴급 요청", Icons.Filled.Sos, Tone.URGENT)
+        RescueMessage.SOS -> MessageCopy("도움 필요", Icons.Filled.Sos, Tone.URGENT)
         RescueMessage.MEDICAL -> MessageCopy("응급 환자", Icons.Filled.MedicalServices, Tone.URGENT)
         RescueMessage.TRAPPED -> MessageCopy("고립됨", Icons.Filled.CarCrash, Tone.URGENT)
         RescueMessage.FIRE -> MessageCopy("화재·연기", Icons.Filled.LocalFireDepartment, Tone.URGENT)

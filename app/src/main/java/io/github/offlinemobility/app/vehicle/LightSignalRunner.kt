@@ -4,6 +4,7 @@ import io.github.offlinemobility.app.debugLog
 import io.github.offlinemobility.app.core.light.Lamp
 import io.github.offlinemobility.app.core.light.LampSwitch
 import io.github.offlinemobility.app.core.light.LightPattern
+import io.github.offlinemobility.app.core.light.restoreOrder
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -78,11 +79,7 @@ class LightSignalRunner(private val gateway: VehicleGateway) {
             }
         } finally {
             withContext(NonCancellable) {
-                // Tail lamp and low beam share one headlamp switch, so restoring a lamp to OFF can
-                // switch off another lamp that should stay on. Apply OFF values first, then the rest.
-                originals.entries
-                    .sortedBy { if (it.value == LampSwitch.OFF) 0 else 1 }
-                    .forEach { (lamp, value) -> gateway.setLamp(lamp, value) }
+                restoreOrder(originals).forEach { (lamp, value) -> gateway.setLamp(lamp, value) }
             }
         }
         return LightRunReport(

@@ -140,7 +140,42 @@
 - 모델별 지원 여부가 다르므로 `check*Capabilities`로 확인 후 사용. 에러 코드에 `ERROR_DRIVING_RESTRICTED`(주행 중 제한) 존재.
 - 에뮬레이터에서 앱의 Light set 호출이 실제로 반영되는지는 문서에 없음. 직접 검증 필요.
 
+Vehicle SDK 2.3.2 전체 영역 20개와 사용 여부 (공개 인터페이스 이름 기준):
+
+| 영역 | 앱 사용 | 용도 또는 쓰지 않는 이유 |
+|---|---|---|
+| Light | 사용 | 불빛 신호, 등화관제 소등(외부등·실내등·독서등·앰비언트) |
+| Gear | 사용 | P단 확인 |
+| EvBattery, Fuel | 사용 | 잔량, 버틸 시간 추정 |
+| HVAC | 사용 | 난방 아끼기, 화생방경보 내기순환·공조 끄기 |
+| Seat | 사용 | 열선, 착좌 감지(인원 기본값) |
+| SteeringWheel | 사용 | 핸들 열선 |
+| Window | 사용 | 화생방경보 창문 닫기 |
+| Odometer | 미사용 | `getRangeRemainingDistance`로 갈 수 있는 주유소·충전소 구분 가능(시설 데이터 단계 후보) |
+| Safety | 미사용 | 에어백 전개·안전벨트 조회. 정차 상황과 접점 약함 |
+| Door, SideMirror, Wiper, Tire, Toll, Display, CarInfo, DrivingMode, Brake, TurnSignal | 미사용 | 피난 정체 상황과 접점 없음. CarInfo(차대번호)는 개인정보 |
+
+에뮬레이터 확인 결과(2026-11-14, Virtual Console 상태값으로 대조):
+- 창문 위치 범위는 0..10, 0이 닫힘. `setWindowPosition(area, 0)`으로 닫힘.
+- 전조등 스위치는 Off / Position / LowBeam 하나라, 미등과 하향등을 따로 쓰면 마지막에 쓴 값이 남는다. 복구는 꺼짐 → 미등 → 하향등 순서로 해야 한다.
+- P단이 아니면 조명 쓰기가 거부된다(오류 50001). 등화관제 중 출발하면 앱이 조명을 복구할 수 없다.
+- 실내등·독서등 끄기와 복구는 반영된다. 앰비언트 조명은 콘솔이 켜짐이어도 SDK 조회가 꺼짐으로 나와 확인하지 못했다.
+- 콘솔 쓰기 API는 브라우저 연결(`POST /browser/session?client=…`, 1초 간격)이 있어야 동작한다.
+
+앱에 넣은 시설 데이터 (공공데이터포털 파일, 키 불필요, `server/scripts/update-facilities.mjs`):
+
+| 종류 | 출처 | 기준일 | 건수 | 이용 조건 |
+|---|---|---|---|---|
+| 약국 | 건강보험심사평가원 전국 병의원 및 약국 현황 (15051059) | 2026-09-30 | 25,829 | 공공누리 1유형(출처 표시) |
+| 종합병원 | 같은 파일의 병원정보 중 종합병원·상급종합 | 2026-09-30 | 384 | 공공누리 1유형 |
+| 편의점 | 소상공인시장진흥공단 상가(상권)정보 (15083033) 중 소분류 편의점 | 2026-09-30 | 55,970 | 제한 없음 |
+
+- 시·도 이름이 파일마다 다르다(강원도/강원특별자치도, 전라북도/전북특별자치도, 광주광역시·전라남도/전남광주통합특별시). 지역으로 찾을 때 같은 곳으로 맞춘다(`provinceKey`).
+- 영업 여부·영업시간은 들어 있지 않다. 종합병원은 응급실 운영 여부가 아니라 종별 기준이다.
+
 기타 SDK:
+- NaviHelper 3.0.5: `requestRoute`, `requestRouteWithWaypoints`, `addWaypoint`, `getCurrentLocationInfo`, `getDestinationInfo`, `getTBTInfo`, `requestNavigationScreen` 등. 신청 없이 사용 가능. 대피소 상세의 `길 안내`에 적용. `requestRoute`는 `pleos.car.permission.NAVI_ROUTE_SEARCH`가 필요하다(없으면 예외). 에뮬레이터(내비 서비스 3.0.4)에서 좌표·이름만 넘겨 경로 안내가 시작되는 것을 확인했다(2026-11-14). 통신이 끊겼을 때 경로 계산이 되는지는 확인하지 못했다.
+- SpeechToText 3.3.1: 음성 인식. 신호를 듣는 마이크와 겹쳐 쓰지 않음.
 - TextToSpeech / SpeechToText: `ON_DEVICE` 모드는 네트워크·앱 등록 불필요. 단, SDK 신청 상태는 "준비 중".
 - FusedLocation: `pleos.car.permission.FUSED_LOCATION`, `isSupported()` 확인.
 

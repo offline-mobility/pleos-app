@@ -43,7 +43,7 @@ class OnlineJsonTest {
     }
 
     @Test
-    fun civilDefenceSheltersComeFirstHoweverFarInEveryAlertStage() {
+    fun theSheltersMeantForTheSituationComeFirstHoweverFar() {
         fun shelter(name: String, kind: String, lat: Double) = Shelter(name, name, kind, lat, 127.0, "", null)
         val all = listOf(
             shelter("경로당", "한파쉼터,무더위쉼터", 37.5001),
@@ -51,10 +51,16 @@ class OnlineJsonTest {
             shelter("지하주차장", "민방위대피소", 37.5200),
             shelter("지하상가", "민방위대피소", 37.5100),
         )
-        for (stage in DisasterType.entries) {
-            val names = ShelterFinder.nearest(all, 37.5, 127.0, 3, ShelterFinder.preferredKind(stage)).map { it.first.name }
-            assertEquals(stage.name, listOf("지하상가", "지하주차장", "경로당"), names)
+        fun first(stage: DisasterType) =
+            ShelterFinder.nearest(all, 37.5, 127.0, 3, ShelterFinder.preferredKind(stage)).map { it.first.name }
+        // Every 민방위 경보 stage: underground shelters first.
+        for (stage in listOf(DisasterType.EVACUATION, DisasterType.ALERT, DisasterType.AIR_RAID, DisasterType.CBRN)) {
+            assertEquals(stage.name, listOf("지하상가", "지하주차장", "경로당"), first(stage))
         }
+        assertEquals(listOf("운동장", "경로당", "지하상가"), first(DisasterType.EARTHQUAKE))
+        assertEquals(listOf("경로당", "운동장", "지하상가"), first(DisasterType.SNOW_COLD))
+        // No kind is meant for the others: simply the nearest.
+        assertEquals(listOf("경로당", "운동장", "지하상가"), first(DisasterType.TYPHOON))
     }
 
     @Test

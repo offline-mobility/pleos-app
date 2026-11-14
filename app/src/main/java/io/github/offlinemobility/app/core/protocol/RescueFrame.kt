@@ -4,7 +4,7 @@ package io.github.offlinemobility.app.core.protocol
  * Predefined rescue messages. The code is the 5-bit value carried on air, so it must stay stable.
  */
 enum class RescueMessage(val code: Int, val title: String, val critical: Boolean) {
-    SOS(0, "SOS 긴급 요청", true),
+    SOS(0, "도움 필요", true),
     MEDICAL(1, "응급 환자 발생", true),
     TRAPPED(2, "고립·이동 불가", true),
     FIRE(3, "화재·연기", true),
@@ -30,10 +30,11 @@ enum class RescueMessage(val code: Int, val title: String, val critical: Boolean
         fun fromCode(code: Int): RescueMessage? = entries.firstOrNull { it.code == code }
 
         /**
-         * The eight messages people can send, in screen order, for one scene: a war evacuation
-         * stuck in traffic with networks down. 식수 also stands for 식량.
+         * The eight messages people can send, in screen order (the first cell on screen is 주변 시설):
+         * what the car is short of and that it is stuck, then people in danger, then the three
+         * "… 필요" requests. 식수 also stands for 식량; [SOS] is shown as "도움 필요".
          */
-        val OFFERED: List<RescueMessage> = listOf(POWER, WATER, MEDICAL, COLD, MEDICINE, SOS, CBRN, FIRE)
+        val OFFERED: List<RescueMessage> = listOf(POWER, TRAPPED, MEDICAL, COLD, CBRN, WATER, MEDICINE, SOS)
 
         /**
          * Everything else (except the reply [ACK]) is no longer sent. Still decoded when an older

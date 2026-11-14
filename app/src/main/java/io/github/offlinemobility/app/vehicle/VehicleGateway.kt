@@ -52,6 +52,28 @@ interface VehicleGateway {
 
     /** Seats the vehicle reports as occupied, or null when it does not report occupancy. */
     suspend fun occupiedSeats(): Set<Seat>?
+
+    /**
+     * Cabin, reading and ambient lamps off, remembering their switches for [restoreCabinLamps].
+     * Returns how many the vehicle refused, or null when it has none the app may switch.
+     */
+    suspend fun darkenCabin(): Int?
+
+    /** Returns the number of lamps that could not be put back. */
+    suspend fun restoreCabinLamps(): Int
+
+    /** Closes every window the app may move. Returns how many the vehicle refused, or null when it has none. */
+    suspend fun closeWindows(): Int?
+
+    /**
+     * Ventilation to recirculation and, with [off], switched off, remembering how it was for
+     * [restoreOutsideAir]. Returns how many settings the vehicle refused, or null when it has no
+     * ventilation the app may control.
+     */
+    suspend fun shutOutsideAir(off: Boolean): Int?
+
+    /** Returns the number of settings that could not be put back. */
+    suspend fun restoreOutsideAir(): Int
     fun release()
 }
 
@@ -119,6 +141,26 @@ class SimulatedVehicleGateway : VehicleGateway {
     }
 
     override suspend fun occupiedSeats(): Set<Seat>? = null
+
+    override suspend fun darkenCabin(): Int = 0
+
+    override suspend fun restoreCabinLamps(): Int = 0
+
+    override suspend fun closeWindows(): Int = 0
+
+    private var climateBeforeShut: ClimateTarget? = null
+
+    override suspend fun shutOutsideAir(off: Boolean): Int {
+        if (climateBeforeShut == null) climateBeforeShut = climate
+        climate = climate.copy(hvacOn = climate.hvacOn && !off, freshAir = false)
+        return 0
+    }
+
+    override suspend fun restoreOutsideAir(): Int {
+        climateBeforeShut?.let { climate = it }
+        climateBeforeShut = null
+        return 0
+    }
 
     override fun release() = Unit
 }

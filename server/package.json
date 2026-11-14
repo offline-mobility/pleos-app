@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "node dev.js",
     "test": "node --test test/*.test.js",
-    "update-civil-shelters": "node scripts/update-civil-shelters.mjs"
+    "update-civil-shelters": "node scripts/update-civil-shelters.mjs",
+    "update-facilities": "node scripts/update-facilities.mjs"
   }
 }

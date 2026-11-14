@@ -16,15 +16,18 @@ class DisasterGuideTest {
     fun everyAlertStageHasExactlyOneGuide() {
         assertEquals(DisasterType.entries.toSet(), DisasterGuides.all.map { it.type }.toSet())
         assertEquals(DisasterType.entries.size, DisasterGuides.all.size)
-        assertEquals(listOf("피난 중", "경계경보", "공습경보", "화생방경보"), DisasterType.entries.map { it.label })
+        assertEquals(
+            listOf("피난 중", "경계경보", "공습경보", "화생방경보", "대설·한파", "호우·침수", "지진", "산불", "태풍·강풍"),
+            DisasterType.entries.map { it.label },
+        )
     }
 
     @Test
     fun eightMessagesAreOfferedInScreenOrderAndTheRestOnlyDecoded() {
         assertEquals(
             listOf(
-                RescueMessage.POWER, RescueMessage.WATER, RescueMessage.MEDICAL, RescueMessage.COLD,
-                RescueMessage.MEDICINE, RescueMessage.SOS, RescueMessage.CBRN, RescueMessage.FIRE,
+                RescueMessage.POWER, RescueMessage.TRAPPED, RescueMessage.MEDICAL, RescueMessage.COLD,
+                RescueMessage.CBRN, RescueMessage.WATER, RescueMessage.MEDICINE, RescueMessage.SOS,
             ),
             RescueMessage.OFFERED,
         )
@@ -56,9 +59,11 @@ class DisasterGuideTest {
         // 야간 공습경보: 전조등·미등·실내등 소등 (행정안전부 민방공 경보 행동요령)
         assertTrue(DisasterGuides.of(DisasterType.AIR_RAID).blackout)
         assertEquals(1, DisasterGuides.all.count { it.blackout })
-        // 화생방: 창문을 닫고 외기 차단
-        assertEquals(WindowAdvice.KEEP_CLOSED, DisasterGuides.of(DisasterType.CBRN).window)
-        assertEquals(1, DisasterGuides.all.count { it.window == WindowAdvice.KEEP_CLOSED })
+        // 화생방·산불: 창문을 닫고 외기 차단
+        assertEquals(
+            setOf(DisasterType.CBRN, DisasterType.WILDFIRE),
+            DisasterGuides.all.filter { it.window == WindowAdvice.KEEP_CLOSED }.map { it.type }.toSet(),
+        )
     }
 
     @Test
@@ -70,6 +75,9 @@ class DisasterGuideTest {
         assertEquals(DisasterType.CBRN, stage("CHEMICAL", "유독가스 유출. 창문을 닫으십시오"))
         assertEquals(DisasterType.AIR_RAID, stage(null, "북한 미사일 발사"))
         assertNull(stage("AIR_RAID", "오늘 14시 민방공 대피훈련이 실시됩니다"))
-        assertNull(stage("SNOW_COLD", "한파주의보 발효"))
+        assertEquals(DisasterType.SNOW_COLD, stage("SNOW_COLD", "대설경보 발효. 차량 고립에 유의하십시오"))
+        assertEquals(DisasterType.EARTHQUAKE, stage("EARTHQUAKE", "규모 4.8 지진 발생"))
+        assertNull(stage("HEAT", "폭염경보 발효"))
+        assertNull(stage("SNOW_COLD", "대설 대비 훈련을 실시합니다"))
     }
 }

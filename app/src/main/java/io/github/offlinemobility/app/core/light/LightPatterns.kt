@@ -14,6 +14,22 @@ enum class Lamp(val label: String) {
 /** Mirrors the vehicle SDK switch values so the original state can be restored exactly. */
 enum class LampSwitch { OFF, ON, DAYTIME_RUNNING, AUTOMATIC }
 
+/**
+ * The order in which remembered switches are put back. Tail lamp and low beam are two positions of
+ * one headlamp switch (Off / Position / Low beam), so each write to one of them moves the other:
+ * OFF values go first, then the tail lamp, then the low beam, so a car that had its low beam on ends
+ * on low beam and not on the tail-lamp position. The high beam follows the low beam it depends on.
+ */
+fun restoreOrder(originals: Map<Lamp, LampSwitch>): List<Pair<Lamp, LampSwitch>> =
+    originals.toList().sortedBy { (lamp, value) ->
+        when {
+            value == LampSwitch.OFF -> 0
+            lamp == Lamp.TAIL_LAMP -> 1
+            lamp == Lamp.LOW_BEAM -> 2
+            else -> 3
+        }
+    }
+
 enum class LampGroup(val label: String) {
     FRONT("전방"),
     REAR("후방"),

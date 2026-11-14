@@ -49,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.offlinemobility.app.InboxItem
 import io.github.offlinemobility.app.InboxKind
+import io.github.offlinemobility.app.vehicle.RouteRequest
 import io.github.offlinemobility.app.UiState
 import io.github.offlinemobility.app.core.online.Shelter
 import io.github.offlinemobility.app.core.online.ShelterFinder
@@ -228,19 +229,6 @@ private fun MapWithNearest(state: UiState, fix: Fix, onShelter: (Shelter) -> Uni
                 Text(directionWord(at), fontSize = Type.body, fontWeight = FontWeight.Bold, color = c.ink)
                 Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = c.mute, modifier = Modifier.size(32.dp))
             }
-            Divider()
-        }
-
-        Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(18.dp).border(2.dp, c.ink))
-            Spacer(Modifier.width(8.dp))
-            Text("대피소", fontSize = Type.meta, color = c.body)
-            Spacer(Modifier.width(24.dp))
-            Box(Modifier.size(18.dp).clip(CircleShape).background(c.ink))
-            Spacer(Modifier.width(8.dp))
-            Text("받은 신호", fontSize = Type.meta, color = c.body)
-            Spacer(Modifier.weight(1f))
-            Text("원 ${ringWord(innerM)} · ${ringWord(outerM)}", fontSize = Type.meta, color = c.mute)
         }
     }
 }
@@ -337,7 +325,7 @@ private fun AroundMap(
         fun px(dp: Int) = with(density) { dp.dp.toPx() }
         val r = min(w, h) / 2 - px(36)
         // Square-root distance scale: near things, which matter most, get most of the room. The rings
-        // are drawn on the same scale and the legend gives their real distances.
+        // are drawn on the same scale.
         fun radius(meters: Double) = (sqrt((meters / outerM).coerceIn(0.0, 1.0)) * r).toFloat()
         val obstacles = mutableListOf(Rect(Offset(cx, cy), px(30)))
         fun place(at: GeoOffset, half: Float): Placed {
@@ -432,51 +420,6 @@ private fun At(x: Float, y: Float, content: @Composable () -> Unit) {
 private fun directionWord(at: GeoOffset): String =
     if (at.meters < 50) "아주 가까이" else "${Geo.compassWord(at.bearingDeg)} ${Geo.distanceWord(at.meters)}"
 
-private fun ringWord(meters: Double): String = when {
-    meters < 1_000 -> "${meters.roundToInt()}m"
-    meters % 1_000 == 0.0 -> "${(meters / 1_000).roundToInt()}km"
-    else -> "%.1fkm".format(meters / 1_000)
-}
-
-/** Details of one shelter tapped on the map. */
-@Composable
-internal fun ShelterDetailSheet(shelter: Shelter, myFix: Fix?, onClose: () -> Unit) {
-    val c = LocalAppColors.current
-    val at = myFix?.let { Geo.offset(it.latitude, it.longitude, shelter.latitude, shelter.longitude) }
-    SheetScrim(onClose) {
-        Sheet(width = 1100.dp, padding = 40.dp) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Home, contentDescription = null, tint = c.ink, modifier = Modifier.size(56.dp))
-                Spacer(Modifier.width(20.dp))
-                Text(shelter.name, fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink, maxLines = 2, lineHeight = Type.lines(Type.display))
-            }
-            Spacer(Modifier.height(24.dp))
-            Divider()
-            if (at != null) {
-                InfoRow("방향·거리", labelWidth = 220.dp) {
-                    Text(directionWord(at), fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.ink)
-                }
-                Divider()
-            }
-            if (shelter.kind.isNotEmpty()) {
-                InfoRow("종류", labelWidth = 220.dp) { Text(shelter.kind, fontSize = Type.body, color = c.ink) }
-                Divider()
-            }
-            shelter.capacity?.let {
-                InfoRow("수용 인원", labelWidth = 220.dp) { Text("약 ${"%,d".format(it)}명", fontSize = Type.body, color = c.ink) }
-                Divider()
-            }
-            if (shelter.address.isNotEmpty()) {
-                InfoRow("주소", labelWidth = 220.dp) {
-                    Text(shelter.address.keepWords(), fontSize = Type.body, lineHeight = Type.lines(Type.body), color = c.ink, modifier = Modifier.weight(1f))
-                }
-                Divider()
-            }
-            Spacer(Modifier.height(32.dp))
-            AppButton("닫기", onClose, Kind.SECONDARY, Modifier.fillMaxWidth())
-        }
-    }
-}
 
 /**
  * A newly received signal shown over the map until closed: the list behind it is one tap away,

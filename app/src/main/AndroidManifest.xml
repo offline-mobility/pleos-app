@@ -27,6 +27,11 @@
     <uses-permission android:name="pleos.car.permission.CONTROL_CAR_CLIMATE" />
     <uses-permission android:name="pleos.car.permission.CAR_SEATS" />
     <uses-permission android:name="pleos.car.permission.CONTROL_CAR_SEATS" />
+    <!-- 화생방경보: closing the windows to keep outside air out (read and set). -->
+    <uses-permission android:name="pleos.car.permission.CAR_WINDOWS" />
+    <uses-permission android:name="pleos.car.permission.CONTROL_CAR_WINDOWS" />
+    <!-- Pleos NaviHelper SDK: handing a shelter to the car's navigation as the destination. -->
+    <uses-permission android:name="pleos.car.permission.NAVI_ROUTE_SEARCH" />
     <!-- Pleos TextToSpeech SDK (ON_DEVICE mode) for reading received messages aloud. -->
     <uses-permission android:name="pleos.car.permission.TTS_SERVICE" />
 

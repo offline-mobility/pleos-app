@@ -2,7 +2,6 @@ package io.github.offlinemobility.app.vehicle
 
 import ai.pleos.playground.vehicle.Vehicle
 import ai.pleos.playground.vehicle.api.model.area.SeatArea
-import ai.pleos.playground.vehicle.api.model.capability.AccessType
 import ai.pleos.playground.vehicle.api.model.capability.AreaBounds
 import ai.pleos.playground.vehicle.api.model.capability.CapabilityConfig
 import ai.pleos.playground.vehicle.constant.area.SeatValue
@@ -189,6 +188,41 @@ internal class PleosClimate(private val vehicle: Vehicle, private val sdk: SdkCa
         return failures
     }
 
+    /** Ventilation as it was before [shutOutsideAir]; kept apart from [saved], which belongs to the heating plan. */
+    private class AirSaved(val power: Map<SeatArea, Boolean>, val recirc: Map<SeatArea, Boolean>)
+
+    private var airSaved: AirSaved? = null
+
+    /**
+     * Keeps outside air out: recirculation, then (with [off]) the whole system off. Remembers how it
+     * was for [restoreOutsideAir]. Returns the number of settings the vehicle refused, or null when
+     * it has no ventilation the app may control.
+     */
+    suspend fun shutOutsideAir(off: Boolean): Int? {
+        if (powerAreas.isEmpty() && recircAreas.isEmpty()) return null
+        val power = powerAreas.read<Boolean> { a, ok, fail -> vehicle.getHVAC().getHvacPowerState(a, ok, fail) }
+        if (airSaved == null) airSaved = AirSaved(power, readRecirculation())
+        var failures = 0
+        // The air source is only accepted while the system is on.
+        if (power.any { it.value }) failures += setRecirculation(recircAreas.associateWith { true })
+        if (off) failures += setPower(power.filterValues { it }.keys, false)
+        return failures
+    }
+
+    /** Returns the number of settings the vehicle refused; on a refusal everything stays remembered for the next call. */
+    suspend fun restoreOutsideAir(): Int {
+        val s = airSaved ?: return 0
+        val wasOn = s.power.filterValues { it }.keys
+        var failures = 0
+        if (wasOn.isNotEmpty()) {
+            failures += setPower(wasOn, true)
+            delay(POWER_SETTLE_MS)
+            failures += setRecirculation(s.recirc)
+        }
+        if (failures == 0) airSaved = null
+        return failures
+    }
+
     private suspend fun readTemperatures() = tempBounds.keys.read<Float> { a, ok, fail ->
         vehicle.getHVAC().getHvacTemperature(a, TemperatureUnit.CELSIUS, ok, fail)
     }
@@ -270,13 +304,9 @@ internal class PleosClimate(private val vehicle: Vehicle, private val sdk: SdkCa
             Seat.REAR_RIGHT -> SeatValue.ROW_2_RIGHT
         }
 
-    /** Result of a capability check, or null when the vehicle does not let the app write it. */
     private suspend fun <V : Any> writable(
         check: (ok: (CapabilityConfig, V) -> Unit, fail: (Exception) -> Unit) -> Unit,
-    ): V? = sdk.call<Pair<CapabilityConfig, V>> { done, fail -> check({ config, value -> done(config to value) }, fail) }
-        .getOrNull()
-        ?.takeIf { it.first.accessType == AccessType.WRITE || it.first.accessType == AccessType.READ_WRITE }
-        ?.second
+    ): V? = sdk.writable(check)
 
     private suspend fun <T> Collection<SeatArea>.read(
         get: (SeatArea, (T?) -> Unit, (Exception) -> Unit) -> Unit,

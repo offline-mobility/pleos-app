@@ -23,7 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * Required manifest permissions: pleos.car.permission.CAR_LIGHTS (read / capability),
  * CONTROL_CAR_LIGHTS (set), CAR_DRIVE (gear), CAR_ENERGY (battery / fuel); climate control is in
- * [PleosClimate]. Every SDK call goes through [SdkCaller].
+ * [PleosClimate], cabin lamps and windows in [PleosBody]. Every SDK call goes through [SdkCaller].
  */
 class PleosVehicleGateway(context: Context) : VehicleGateway {
     override val isSimulated: Boolean = false
@@ -32,6 +32,7 @@ class PleosVehicleGateway(context: Context) : VehicleGateway {
     private var initialized = false
     private val sdk = SdkCaller { initialized }
     private val climate = PleosClimate(vehicle, sdk)
+    private val body = PleosBody(vehicle, sdk)
 
     private val _gear = MutableStateFlow(GearState.UNKNOWN)
     override val gear: StateFlow<GearState> = _gear.asStateFlow()
@@ -130,6 +131,16 @@ class PleosVehicleGateway(context: Context) : VehicleGateway {
     override suspend fun cabinTemperature(): Double? = climate.cabinTemperature()
 
     override suspend fun occupiedSeats(): Set<Seat>? = climate.occupiedSeats()
+
+    override suspend fun darkenCabin(): Int? = body.darkenCabin()
+
+    override suspend fun restoreCabinLamps(): Int = body.restoreCabinLamps()
+
+    override suspend fun closeWindows(): Int? = body.closeWindows()
+
+    override suspend fun shutOutsideAir(off: Boolean): Int? = climate.shutOutsideAir(off)
+
+    override suspend fun restoreOutsideAir(): Int = climate.restoreOutsideAir()
 
     override fun release() {
         if (!initialized) return

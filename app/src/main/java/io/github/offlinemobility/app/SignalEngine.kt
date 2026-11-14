@@ -27,6 +27,9 @@ import io.github.offlinemobility.app.core.online.OfficialAlert
 import io.github.offlinemobility.app.core.online.RemoteIncident
 import io.github.offlinemobility.app.core.online.Area
 import io.github.offlinemobility.app.core.online.CivilShelters
+import io.github.offlinemobility.app.core.online.FacilityFile
+import io.github.offlinemobility.app.core.online.FacilityKind
+import io.github.offlinemobility.app.core.online.Place
 import io.github.offlinemobility.app.core.online.Shelter
 import io.github.offlinemobility.app.core.position.PositionGuard
 import io.github.offlinemobility.app.core.position.positionStillValid
@@ -55,6 +58,9 @@ import io.github.offlinemobility.app.core.safety.SafetyGate
 import io.github.offlinemobility.app.core.safety.SafetyVerdict
 import io.github.offlinemobility.app.core.safety.TransmitChannel
 import io.github.offlinemobility.app.core.safety.VehicleSafetyState
+import io.github.offlinemobility.app.vehicle.CarBlackout
+import io.github.offlinemobility.app.vehicle.CarNavigator
+import io.github.offlinemobility.app.vehicle.RouteRequest
 import io.github.offlinemobility.app.vehicle.ClimateSupport
 import io.github.offlinemobility.app.vehicle.KeepWarmRunner
 import io.github.offlinemobility.app.vehicle.LampSupport
@@ -150,6 +156,17 @@ data class KeepWarmState(
     val endedNote: String? = null,
 )
 
+/**
+ * Outside air shut out by the car for a 화생방경보. Each number is how many parts the vehicle refused;
+ * null when the vehicle has no such part the app may control.
+ */
+data class CabinSeal(val windowsRefused: Int?, val airRefused: Int?) {
+    val refused: Boolean get() = (windowsRefused ?: 0) > 0 || (airRefused ?: 0) > 0
+
+    /** The car did everything it can do here, and that is at least one thing. */
+    val done: Boolean get() = !refused && (windowsRefused != null || airRefused != null)
+}
+
 data class UiState(
     val vehicleMode: VehicleMode = VehicleMode.CONNECTING,
     val vehicleMessage: String = "차량 서비스 연결 중",
@@ -205,6 +222,18 @@ data class UiState(
     val online: OnlineState = OnlineState(),
     val dismissedAlerts: Set<String> = emptySet(),
     val keepWarm: KeepWarmState = KeepWarmState(),
+    /**
+     * The car's own lamps are off for the blackout; the number is how many it refused to switch
+     * off. Null while they are not, or when the vehicle has no lamp the app may switch.
+     */
+    val carDarkRefused: Int? = null,
+    /** Windows closed and outside air shut out by the car; null while they are not. */
+    val carSeal: CabinSeal? = null,
+    /** What became of the last destination handed to the car's navigation. */
+    val route: RouteRequest = RouteRequest.NONE,
+    /** Kind chosen under "주변 시설" and, for kinds read from the app's own files, the places found. */
+    val facilityKind: FacilityKind = FacilityKind.SHELTER,
+    val facilities: List<Place> = emptyList(),
 ) {
     val guide: DisasterGuide get() = DisasterGuides.of(disaster)
 
@@ -262,6 +291,7 @@ class SignalEngine(application: Application) {
     private val receiver = AcousticReceiver(application, config)
     private val locationTracker = LocationTracker(application)
     private val announcer = VoiceAnnouncer(application, scope)
+    private val navigator = CarNavigator(application)
     private val outbox = RescueOutbox(application)
     private val serverUrl: String = application.getString(R.string.server_url)
     private val server = ServerClient(serverUrl)
@@ -347,6 +377,85 @@ class SignalEngine(application: Application) {
     /** True while blackout is on only because the air-raid mode turned it on. */
     private var blackoutByMode = false
 
+    private val carBlackout = CarBlackout(CarBlackout.decode(prefs.getString(KEY_DARK_LAMPS, null))) { debugLog { it } }
+    /** Lamps are off because of the blackout; true from the start when the app stopped while they were. */
+    private var carDark = carBlackout.remembered.isNotEmpty()
+    /** The last attempt to put the lamps back was refused in part, so they may be half on. */
+    private var darkRestorePending = false
+    private var carSealed = false
+    /** Lamp and climate capabilities are known, so [syncCarToStage] may act. */
+    private var vehicleReady = false
+    private var stageJob: Job? = null
+    private var facilityJob: Job? = null
+    private val appAssets = application.assets
+
+    /**
+     * Makes the car follow the alert stage, as the official guidance says to do by hand: every lamp
+     * off while blackout is on (공습경보), windows closed and outside air shut out while the cabin has
+     * to stay sealed (화생방경보). The car is only changed while parked. Lamps come back when the
+     * blackout ends; ventilation comes back when the stage ends, and the windows stay closed. Runs
+     * one change at a time.
+     *
+     * The vehicle refuses lamp control once it leaves P, so a car that drives off in the dark cannot
+     * be lit again from here: the person is told by voice to switch the headlamps on, and the lamps
+     * are put back at the next chance.
+     */
+    private fun syncCarToStage() {
+        val previous = stageJob
+        stageJob = scope.launch {
+            previous?.join()
+            if (!vehicleReady) return@launch
+            val s = _state.value
+            val parked = s.gear == GearState.PARK
+
+            val wantDark = s.blackout && parked
+            if (wantDark && (!carDark || darkRestorePending)) {
+                // A light signal that was just stopped puts its lamps back first.
+                lightJob?.cancelAndJoin()
+                val refused = carBlackout.darken(gateway)
+                carDark = true
+                darkRestorePending = false
+                prefs.edit().putString(KEY_DARK_LAMPS, CarBlackout.encode(carBlackout.remembered)).apply()
+                debugLog { "car blackout on, refused=$refused" }
+                _state.update { it.copy(carDarkRefused = refused) }
+            } else if (!wantDark && carDark) {
+                val failures = carBlackout.restore(gateway)
+                debugLog { "car blackout off, not restored=$failures" }
+                if (failures == 0) {
+                    carDark = false
+                    darkRestorePending = false
+                    prefs.edit().remove(KEY_DARK_LAMPS).apply()
+                    _state.update { it.copy(carDarkRefused = null) }
+                } else {
+                    prefs.edit().putString(KEY_DARK_LAMPS, CarBlackout.encode(carBlackout.remembered)).apply()
+                    // Said once, when the car first drives off dark; not on every later gear change.
+                    if (!parked && !darkRestorePending) announcer.say(DARK_DRIVE_WARNING)
+                    darkRestorePending = true
+                }
+            }
+
+            val wantSeal = s.cabinSealed
+            if (wantSeal == carSealed || (wantSeal && !parked)) return@launch
+            // The heating plan owns the climate while it runs: let it put things back, change the
+            // ventilation, then start it again for the new stage.
+            val rewarm = s.keepWarm.active
+            if (rewarm) warmJob?.cancelAndJoin()
+            if (wantSeal) {
+                val seal = CabinSeal(gateway.closeWindows(), gateway.shutOutsideAir(off = !rewarm))
+                debugLog { "car sealed $seal" }
+                _state.update { it.copy(carSeal = seal) }
+                carSealed = true
+            } else {
+                val failures = gateway.restoreOutsideAir()
+                debugLog { "car unsealed, not restored=$failures" }
+                _state.update { it.copy(carSeal = null) }
+                // A refused restore is tried again at the next change of gear or stage.
+                carSealed = failures > 0
+            }
+            if (rewarm) startKeepWarm()
+        }
+    }
+
     init {
         uploader.start()
         onlineSync.start()
@@ -360,6 +469,7 @@ class SignalEngine(application: Application) {
         }
         scope.launch { uploader.status.collect { st -> _state.update { it.copy(gateway = st) } } }
         scope.launch { announcer.available.collect { ok -> _state.update { it.copy(voiceAvailable = ok) } } }
+        scope.launch { navigator.request.collect { r -> _state.update { it.copy(route = r) } } }
         val savedDisaster = prefs.getString(KEY_DISASTER, null)
             ?.let { name -> DisasterType.entries.firstOrNull { it.name == name } }
         if (savedDisaster != null) {
@@ -396,6 +506,7 @@ class SignalEngine(application: Application) {
 
     fun connectVehicle() {
         _state.update { it.copy(vehicleMode = VehicleMode.CONNECTING, vehicleMessage = "차량 서비스 연결 중") }
+        vehicleReady = false
         scope.launch {
             val result = pleos.connect()
             gateway = if (result.isSuccess) pleos else simulated
@@ -424,6 +535,8 @@ class SignalEngine(application: Application) {
             // Head count starts from the seat sensors until the user sets it.
             val occupied = gateway.occupiedSeats()?.size ?: 0
             if (occupied > 0 && !peopleEdited) _state.update { it.copy(people = occupied) }
+            vehicleReady = true
+            syncCarToStage()
         }
     }
 
@@ -440,6 +553,7 @@ class SignalEngine(application: Application) {
             stopTransmission("P단 해제로 송신을 중단했습니다")
             stopKeepWarm("기어를 바꿔서 난방을 원래대로 돌려놓았어요")
         }
+        syncCarToStage()
     }
 
     fun selectWarmLevel(level: WarmLevel) =
@@ -506,7 +620,8 @@ class SignalEngine(application: Application) {
 
     /**
      * Switches the disaster mode. A mode that calls for blackout (air raid) turns it on, and leaving
-     * that mode turns it off again unless the user had switched it on themselves.
+     * that mode turns it off again unless the user had switched it on themselves. The car follows
+     * (see [syncCarToStage]).
      */
     fun selectDisaster(type: DisasterType) {
         prefs.edit().putString(KEY_DISASTER, type.name).apply()
@@ -522,11 +637,39 @@ class SignalEngine(application: Application) {
                 blackoutByMode = false
             }
         }
-        val wasSealed = _state.value.cabinSealed
         _state.update { it.copy(disaster = type) }
-        // Whether outside air may come in is fixed when the heating plan starts, so start it again.
-        if (_state.value.keepWarm.active && _state.value.cabinSealed != wasSealed) startKeepWarm()
+        syncCarToStage()
     }
+
+    /** Sets the place as the destination in the car's own navigation. */
+    fun routeTo(place: Place) = navigator.routeTo(place.name, place.latitude, place.longitude, place.address)
+
+    /**
+     * Chooses what "주변 시설" lists. Shelters are already in the state; the other kinds are read from
+     * the app's own files: nearest to the trusted position, or those in the area picked by hand.
+     */
+    fun showFacilities(kind: FacilityKind) {
+        facilityJob?.cancel()
+        _state.update { it.copy(facilityKind = kind, facilities = emptyList()) }
+        val asset = kind.asset ?: return
+        val s = _state.value
+        val fix = s.myFix.takeIf { s.chosenArea == null }
+        val area = s.chosenArea
+        if (fix == null && area == null) return
+        facilityJob = scope.launch {
+            val found = withContext(Dispatchers.IO) {
+                runCatching {
+                    appAssets.open("facilities/$asset.tsv").bufferedReader().useLines { lines ->
+                        if (fix != null) FacilityFile.nearest(lines, kind, fix.latitude, fix.longitude, FACILITY_COUNT)
+                        else FacilityFile.inArea(lines, kind, area!!, FACILITY_AREA_COUNT)
+                    }
+                }.onFailure { debugLog { "facilities ${kind.name} not read: ${it.message}" } }.getOrDefault(emptyList())
+            }
+            _state.update { if (it.facilityKind == kind) it.copy(facilities = found) else it }
+        }
+    }
+
+    fun clearRoute() = navigator.clear()
 
     /** Starts GPS when permission is available (called again after the user grants it). */
     fun refreshLocation() {
@@ -631,6 +774,7 @@ class SignalEngine(application: Application) {
             _state.update { it.copy(tx = it.tx.copy(lightActive = false, lightOn = false, lightPlanned = false).settle()) }
         }
         _state.update { it.copy(blackout = turningOn) }
+        syncCarToStage()
     }
 
     fun setSimulatedGear(gear: GearState) {
@@ -769,7 +913,10 @@ class SignalEngine(application: Application) {
 
     private fun sendLight(pattern: LightPattern, plan: LightPlan) {
         val runner = LightSignalRunner(gateway)
+        val stage = stageJob
         lightJob = scope.launch {
+            // Lamps that are still being put back after a blackout must settle before they flash.
+            stage?.join()
             _state.update { it.copy(tx = it.tx.copy(lightActive = true, lightPattern = pattern, lightProgress = 0f)) }
             val report = runner.run(pattern, plan.flash, plan.steady) { step, total, on ->
                 _state.update { it.copy(tx = it.tx.copy(lightProgress = step.toFloat() / total, lightOn = on)) }
@@ -932,6 +1079,10 @@ class SignalEngine(application: Application) {
         const val SHELTER_REFRESH_M = 200.0
         const val KEY_LAST_FIX = "last_fix"
         const val KEY_DISASTER = "disaster"
+        const val KEY_DARK_LAMPS = "dark_lamps"
+        const val FACILITY_COUNT = 20
+        const val FACILITY_AREA_COUNT = 60
+        const val DARK_DRIVE_WARNING = "차 불이 꺼져 있어요. 출발하기 전에 전조등을 직접 켜 주세요."
         const val KEY_OWN_SENT = "own_sent"
         const val OWN_SENT_KEEP_MS = 72 * 3_600_000L
         const val ENERGY_POLL_MS = 60_000L

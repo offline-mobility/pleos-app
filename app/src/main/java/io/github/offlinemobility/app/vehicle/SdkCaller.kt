@@ -1,5 +1,7 @@
 package io.github.offlinemobility.app.vehicle
 
+import ai.pleos.playground.vehicle.api.model.capability.AccessType
+import ai.pleos.playground.vehicle.api.model.capability.CapabilityConfig
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
@@ -33,6 +35,14 @@ internal class SdkCaller(private val ready: () -> Boolean) {
         }
         return result ?: Result.failure(IllegalStateException("차량 서비스 응답 시간 초과"))
     }
+
+    /** Result of a capability check, or null when the vehicle does not let the app write it. */
+    suspend fun <V : Any> writable(
+        check: (ok: (CapabilityConfig, V) -> Unit, fail: (Exception) -> Unit) -> Unit,
+    ): V? = call<Pair<CapabilityConfig, V>> { done, fail -> check({ config, value -> done(config to value) }, fail) }
+        .getOrNull()
+        ?.takeIf { it.first.accessType == AccessType.WRITE || it.first.accessType == AccessType.READ_WRITE }
+        ?.second
 
     private fun <T> CancellableContinuation<T>.resumeOnce(value: T) {
         if (isActive) resume(value)

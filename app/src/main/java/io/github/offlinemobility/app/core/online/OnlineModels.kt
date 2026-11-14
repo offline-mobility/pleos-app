@@ -123,11 +123,16 @@ object OnlineJson {
 
 object ShelterFinder {
     /**
-     * Word in [Shelter.kind] for the shelters to show first. In a war the underground
-     * 민방위대피소, built for air raids, come first whatever the alert stage.
+     * Word in [Shelter.kind] for the shelters to show first: the underground 민방위대피소 in a war
+     * whatever the alert stage, an open assembly point after an earthquake, a staffed rest area in
+     * extreme cold. Null when any shelter will do.
      */
-    @Suppress("UNUSED_PARAMETER")
-    fun preferredKind(disaster: DisasterType): String = CivilShelters.KIND
+    fun preferredKind(disaster: DisasterType): String? = when (disaster) {
+        DisasterType.EVACUATION, DisasterType.ALERT, DisasterType.AIR_RAID, DisasterType.CBRN -> CivilShelters.KIND
+        DisasterType.EARTHQUAKE -> "지진옥외"
+        DisasterType.SNOW_COLD -> "한파"
+        DisasterType.FLOOD, DisasterType.WILDFIRE, DisasterType.TYPHOON -> null
+    }
 
     /**
      * Nearest shelters with distance and bearing from the given point. Shelters whose kind contains

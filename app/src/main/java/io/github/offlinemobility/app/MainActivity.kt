@@ -78,6 +78,9 @@ class MainActivity : ComponentActivity() {
                         usePositionJump = engine::usePositionJump,
                         keepPosition = engine::keepPosition,
                         chooseArea = engine::chooseArea,
+                        routeTo = engine::routeTo,
+                        facilities = engine::showFacilities,
+                        clearRoute = engine::clearRoute,
                     ),
                 )
             }
