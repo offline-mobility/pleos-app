@@ -23,17 +23,17 @@ class DisasterGuideTest {
     }
 
     @Test
-    fun eightMessagesAreOfferedInScreenOrderAndTheRestOnlyDecoded() {
+    fun sevenMessagesAreOfferedInScreenOrderAndTheRestOnlyDecoded() {
         assertEquals(
             listOf(
-                RescueMessage.POWER, RescueMessage.TRAPPED, RescueMessage.MEDICAL, RescueMessage.COLD,
-                RescueMessage.CBRN, RescueMessage.WATER, RescueMessage.MEDICINE, RescueMessage.SOS,
+                RescueMessage.POWER, RescueMessage.TRAPPED, RescueMessage.COLD, RescueMessage.MEDICAL,
+                RescueMessage.WATER, RescueMessage.MEDICINE, RescueMessage.SOS,
             ),
             RescueMessage.OFFERED,
         )
         assertTrue(RescueMessage.OFFERED.none { it in RescueMessage.RETIRED })
         assertTrue(RescueMessage.ACK !in RescueMessage.RETIRED)
-        assertEquals(RescueMessage.entries.size - 8 - 1, RescueMessage.RETIRED.size)
+        assertEquals(RescueMessage.entries.size - 7 - 1, RescueMessage.RETIRED.size)
     }
 
     @Test

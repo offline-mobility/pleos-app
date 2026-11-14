@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -336,18 +337,19 @@ private fun Header(state: UiState, received: Int, onInbox: () -> Unit, onDisaste
             }
             Spacer(Modifier.width(PANEL_GAP))
             val buttons: @Composable RowScope.() -> Unit = {
-                // Shares follow the length of each name, so "받은 신호 12" has room for its count.
-                fun share(weight: Float) = if (wide) Modifier.weight(weight) else Modifier
+                // Three equal buttons; the side padding is trimmed so "받은 신호 12" keeps its count.
+                val each = if (wide) Modifier.weight(1f) else Modifier
                 AppButton(
                     if (received > 0) "받은 신호 $received" else "받은 신호",
                     onInbox,
                     Kind.SECONDARY,
-                    share(1.5f),
+                    each,
                     height = Size.secondaryButton,
                     icon = Icons.Filled.Notifications,
+                    sidePadding = HEADER_BUTTON_PADDING,
                 )
-                AppButton("행동요령", onDisaster, Kind.SECONDARY, share(1.2f), height = Size.secondaryButton, icon = Icons.Filled.MenuBook)
-                AppButton("설정", onSettings, Kind.SECONDARY, share(0.9f), height = Size.secondaryButton, icon = Icons.Filled.Settings)
+                AppButton("행동요령", onDisaster, Kind.SECONDARY, each, height = Size.secondaryButton, icon = Icons.Filled.MenuBook, sidePadding = HEADER_BUTTON_PADDING)
+                AppButton("설정", onSettings, Kind.SECONDARY, each, height = Size.secondaryButton, icon = Icons.Filled.Settings, sidePadding = HEADER_BUTTON_PADDING)
             }
             if (wide) Row(Modifier.weight(MAP_WEIGHT), horizontalArrangement = Arrangement.spacedBy(12.dp), content = buttons)
             else Row(horizontalArrangement = Arrangement.spacedBy(12.dp), content = buttons)
@@ -360,6 +362,7 @@ private const val SEND_WEIGHT = 1.15f
 private const val MAP_WEIGHT = 0.85f
 private val PANEL_GAP = 20.dp
 private val HEADER_WIDE = 1200.dp
+private val HEADER_BUTTON_PADDING = 10.dp
 
 /**
  * Whether sending works, then only what is out of the ordinary: practice mode, lost connection,
@@ -389,6 +392,7 @@ private fun statusLine(state: UiState, c: AppColors): AnnotatedString = buildAnn
     if (state.gateway.enabled && !state.gateway.online) item("통신 끊김 · 소리와 빛으로 보내요", c.urgent)
     if (state.blackout) item("등화관제 중", c.ink)
     if (state.carSeal?.done == true) item("외기 차단 중", c.ink)
+    if (state.keepWarm.active) item("저전력 모드 중", c.ink)
     state.endurance?.takeIf { it.low }?.let { e -> item("${if (e.isEv) "배터리" else "연료"} ${e.percent}% 남음", c.urgent) }
 }
 
@@ -452,12 +456,44 @@ private fun SendArea(
                 }
                 Spacer(Modifier.height(Size.gap))
             }
-            MessagePicker(RescueMessage.OFFERED, enabled = state.safety.allowed, onPick = onPick, onFacilities = onFacilities, modifier = Modifier.weight(1f))
+            MessagePicker(
+                RescueMessage.OFFERED,
+                enabled = state.safety.allowed,
+                onPick = onPick,
+                onFacilities = onFacilities,
+                lowPower = when {
+                    state.keepWarm.active -> LowPower.ON
+                    showKeepWarm(state) -> LowPower.READY
+                    else -> LowPower.UNAVAILABLE
+                },
+                onLowPower = onKeepWarm,
+                modifier = Modifier.weight(1f),
+            )
         }
-        if (showKeepWarm(state)) {
-            Spacer(Modifier.height(Size.gap))
-            KeepWarmBar(state, onKeepWarm)
-        }
+    }
+}
+
+/** 저전력 모드 cell: usable on a parked car with a traction battery reading and a heater the app may control. */
+private enum class LowPower { UNAVAILABLE, READY, ON }
+
+/** A cell that opens something instead of sending: grey, or filled black while its mode is on. */
+@Composable
+private fun FunctionTile(icon: ImageVector, title: String, modifier: Modifier, on: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
+    val c = LocalAppColors.current
+    val fg = when {
+        on -> c.page
+        enabled -> c.ink
+        else -> c.mute
+    }
+    Column(
+        modifier.heightIn(min = Size.tile).background(if (on) c.ink else c.surface).border(1.dp, if (on) c.ink else c.line)
+            .clickable(enabled = enabled, onClick = onClick).padding(16.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(76.dp))
+        Spacer(Modifier.height(18.dp))
+        Text(title, fontSize = Type.tileTitle, fontWeight = FontWeight.Bold, color = fg, maxLines = 1)
     }
 }
 
@@ -471,29 +507,34 @@ private fun MessagePicker(
     enabled: Boolean,
     onPick: (RescueMessage) -> Unit,
     onFacilities: () -> Unit,
+    lowPower: LowPower,
+    onLowPower: () -> Unit,
     modifier: Modifier,
 ) {
-    val c = LocalAppColors.current
-    val cells: List<RescueMessage?> = listOf(null) + messages
+    // Nine cells: 주변 시설 first and 저전력 모드 in the middle send nothing; the rest are messages.
+    // A message is a RescueMessage, the two others are marked by these constants.
+    val cells: List<Any> = buildList {
+        add(CELL_FACILITIES)
+        addAll(messages)
+        add(LOW_POWER_CELL.coerceAtMost(size), CELL_LOW_POWER)
+    }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(Size.gap)) {
         cells.chunked(GRID_COLUMNS).forEach { row ->
             Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
-                row.forEach { message ->
+                row.forEach { item ->
                     val cell = Modifier.weight(1f).fillMaxHeight()
-                    if (message != null) {
+                    when (item) {
                         // Only sending needs P; finding a facility works whenever the screen is shown.
-                        MessageTile(message, enabled, onPick, cell.alpha(if (enabled) 1f else 0.4f))
-                    } else {
-                        Column(
-                            cell.heightIn(min = Size.tile).background(c.surface).border(1.dp, c.line)
-                                .clickable(onClick = onFacilities).padding(16.dp),
-                            verticalArrangement = Arrangement.Center,
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            Icon(Icons.Filled.Place, contentDescription = null, tint = c.ink, modifier = Modifier.size(76.dp))
-                            Spacer(Modifier.height(18.dp))
-                            Text("주변 시설", fontSize = Type.tileTitle, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1)
-                        }
+                        is RescueMessage -> MessageTile(item, enabled, onPick, cell.alpha(if (enabled) 1f else 0.4f))
+                        CELL_FACILITIES -> FunctionTile(Icons.Filled.Place, "주변 시설", cell, onClick = onFacilities)
+                        else -> FunctionTile(
+                            Icons.Filled.BatterySaver,
+                            "저전력 모드",
+                            cell,
+                            on = lowPower == LowPower.ON,
+                            enabled = lowPower != LowPower.UNAVAILABLE,
+                            onClick = onLowPower,
+                        )
                     }
                 }
                 repeat(GRID_COLUMNS - row.size) { Spacer(Modifier.weight(1f)) }
@@ -503,6 +544,10 @@ private fun MessagePicker(
 }
 
 private const val GRID_COLUMNS = 3
+private const val CELL_FACILITIES = "facilities"
+private const val CELL_LOW_POWER = "lowPower"
+/** 저전력 모드 sits in the middle of the grid (second row, second cell). */
+private const val LOW_POWER_CELL = 4
 
 @Composable
 private fun MessageTile(message: RescueMessage, enabled: Boolean, onPick: (RescueMessage) -> Unit, modifier: Modifier) {
@@ -1207,6 +1252,7 @@ fun AppButton(
     enabled: Boolean = true,
     icon: ImageVector? = null,
     fontSize: TextUnit = Type.button,
+    sidePadding: Dp = 24.dp,
 ) {
     val c = LocalAppColors.current
     // Pleos buttons: filled black for the main action, outlined for the rest, whatever the message
@@ -1220,7 +1266,7 @@ fun AppButton(
     Row(
         modifier.heightIn(min = height).background(bg)
             .let { if (border != null) it.border(border) else it }
-            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 24.dp),
+            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = sidePadding),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {

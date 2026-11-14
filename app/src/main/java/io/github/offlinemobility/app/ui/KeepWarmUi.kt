@@ -19,7 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Thermostat
+import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -60,50 +60,6 @@ private fun nowWord(warm: KeepWarmState): String = when {
 private fun cabinWord(cabinC: Double?): String? = cabinC?.let { "실내 약 ${it.roundToInt()}도" }
 
 @Composable
-internal fun KeepWarmBar(state: UiState, onClick: () -> Unit) {
-    val c = LocalAppColors.current
-    val warm = state.keepWarm
-    val estimate = state.keepWarmEstimate
-    val shape = RoundedCornerShape(Size.radius)
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = 92.dp).clip(shape)
-            .background(if (warm.active) c.safeSoft else c.canvas)
-            .border(1.dp, if (warm.active) c.safe.copy(alpha = 0.35f) else c.line, shape)
-            .clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(Icons.Filled.Thermostat, contentDescription = null, tint = if (warm.active) c.safe else c.accent, modifier = Modifier.size(40.dp))
-        Spacer(Modifier.width(16.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                if (warm.active) "난방을 아끼는 중" else "난방 아끼며 오래 버티기",
-                fontSize = Type.body,
-                fontWeight = FontWeight.Bold,
-                color = c.ink,
-            )
-            val meta = when {
-                warm.active -> listOfNotNull(
-                    cabinWord(warm.cabinC),
-                    nowWord(warm),
-                    estimate?.let { "${warmHoursWord(it.hours(warm.level))} 버틸 수 있어요 (추정)" },
-                ).joinToString(" · ")
-                warm.endedNote != null -> warm.endedNote
-                estimate != null -> "지금처럼 틀면 ${warmHoursWord(estimate.normalHours)} · 아껴 쓰면 ${warmHoursWord(estimate.saverHours)} (추정)"
-                else -> ""
-            }
-            Text(meta, fontSize = Type.meta, color = c.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        Spacer(Modifier.width(12.dp))
-        Text(
-            if (warm.active) "보기 ›" else "열기 ›",
-            fontSize = Type.body,
-            fontWeight = FontWeight.Bold,
-            color = if (warm.active) c.safe else c.accent,
-        )
-    }
-}
-
-@Composable
 internal fun KeepWarmSheet(state: UiState, actions: ScreenActions, onClose: () -> Unit) {
     val c = LocalAppColors.current
     val warm = state.keepWarm
@@ -111,10 +67,10 @@ internal fun KeepWarmSheet(state: UiState, actions: ScreenActions, onClose: () -
     SheetScrim(onClose) {
         Sheet(width = 1000.dp) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Thermostat, contentDescription = null, tint = if (warm.active) c.safe else c.accent, modifier = Modifier.size(52.dp))
+                Icon(Icons.Filled.BatterySaver, contentDescription = null, tint = c.ink, modifier = Modifier.size(52.dp))
                 Spacer(Modifier.width(16.dp))
                 Text(
-                    if (warm.active) "난방을 아끼는 중" else "난방 아끼며 오래 버티기",
+                    if (warm.active) "저전력 모드 중" else "저전력 모드",
                     fontSize = Type.display,
                     fontWeight = FontWeight.ExtraBold,
                     color = c.ink,

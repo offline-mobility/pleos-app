@@ -30,11 +30,11 @@ enum class RescueMessage(val code: Int, val title: String, val critical: Boolean
         fun fromCode(code: Int): RescueMessage? = entries.firstOrNull { it.code == code }
 
         /**
-         * The eight messages people can send, in screen order (the first cell on screen is 주변 시설):
-         * what the car is short of and that it is stuck, then people in danger, then the three
-         * "… 필요" requests. 식수 also stands for 식량; [SOS] is shown as "도움 필요".
+         * The seven messages people can send, in screen order. On screen they share a 3×3 grid with
+         * two cells that send nothing: 주변 시설 first and 저전력 모드 in the middle. 식수 also stands
+         * for 식량; [SOS] is shown as "도움 필요".
          */
-        val OFFERED: List<RescueMessage> = listOf(POWER, TRAPPED, MEDICAL, COLD, CBRN, WATER, MEDICINE, SOS)
+        val OFFERED: List<RescueMessage> = listOf(POWER, TRAPPED, COLD, MEDICAL, WATER, MEDICINE, SOS)
 
         /**
          * Everything else (except the reply [ACK]) is no longer sent. Still decoded when an older
