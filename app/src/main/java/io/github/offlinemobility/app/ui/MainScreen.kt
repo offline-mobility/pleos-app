@@ -215,20 +215,11 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
 @Composable
 private fun Header(state: UiState, onShelters: () -> Unit, onDisaster: () -> Unit, onSettings: () -> Unit) {
     val c = LocalAppColors.current
-    val text = when {
-        state.vehicleMode == VehicleMode.CONNECTING -> "차량에 연결하는 중"
-        state.gear == GearState.PARK -> "정차 중 · 신호를 보낼 수 있어요"
-        state.gear == GearState.UNKNOWN -> "차 상태를 확인하고 있어요"
-        else -> "주행 중 · 차를 세우고 P단에서 보낼 수 있어요"
-    }
     Row(Modifier.fillMaxWidth().heightIn(min = Size.secondaryButton), verticalAlignment = Alignment.CenterVertically) {
-        // Left: everything about the current state. Right: only things to press, all the same size.
+        // Left: what to do, and below it in small type whether sending works. Right: only things to press.
         Column(Modifier.weight(1f)) {
-            Text(text, fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            val status = statusLine(state, c)
-            if (status.isNotEmpty()) {
-                Text(status, fontSize = Type.meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
+            Text("어떤 상황인지 알려주세요", fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(statusLine(state, c), fontSize = Type.meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.width(16.dp))
         if (state.online.shelters.isNotEmpty()) {
@@ -247,21 +238,29 @@ private fun Header(state: UiState, onShelters: () -> Unit, onDisaster: () -> Uni
     }
 }
 
-/** Connection, blackout and energy in one line under the headline; colour only where it means something. */
+/**
+ * Whether sending works, then only what is out of the ordinary: practice mode, lost connection,
+ * blackout, low energy. A normal connection or a full battery is not news, so it is not shown.
+ */
 private fun statusLine(state: UiState, c: AppColors): AnnotatedString = buildAnnotatedString {
     fun item(text: String, color: Color, strong: Boolean = true) {
         if (length > 0) withStyle(SpanStyle(color = c.mute)) { append("  ·  ") }
         withStyle(SpanStyle(color = color, fontWeight = if (strong) FontWeight.SemiBold else FontWeight.Normal)) { append(text) }
     }
-    if (state.vehicleMode == VehicleMode.SIMULATION) item("연습 모드", c.body)
-    if (state.gateway.enabled) {
-        if (state.gateway.online) item("통신 연결됨", c.body, strong = false) else item("통신 끊김 · 소리와 빛으로 보내요", c.urgent)
-    }
+    item(
+        when {
+            state.vehicleMode == VehicleMode.CONNECTING -> "차량에 연결하는 중"
+            state.gear == GearState.PARK -> "신호를 보낼 수 있어요"
+            state.gear == GearState.UNKNOWN -> "차 상태를 확인하고 있어요"
+            else -> "차를 세우고 기어를 P로 바꾸면 보낼 수 있어요"
+        },
+        c.body,
+        strong = false,
+    )
+    if (state.vehicleMode == VehicleMode.SIMULATION) item("연습 모드", c.body, strong = false)
+    if (state.gateway.enabled && !state.gateway.online) item("통신 끊김 · 소리와 빛으로 보내요", c.urgent)
     if (state.blackout) item("등화관제 중", c.ink)
-    // Only what the car reports. Hours are estimates and appear where they help a decision (난방 아끼기 줄).
-    state.endurance?.let { e ->
-        item("${if (e.isEv) "배터리" else "연료"} ${e.percent}%", if (e.low) c.urgent else c.body, strong = e.low)
-    }
+    state.endurance?.takeIf { it.low }?.let { e -> item("${if (e.isEv) "배터리" else "연료"} ${e.percent}% 남음", c.urgent) }
 }
 
 // ---------------------------------------------------------------- send area
@@ -325,16 +324,6 @@ private fun SendArea(
                 Spacer(Modifier.height(Size.gap))
             }
             MessagePicker(state.guide.firstScreen, enabled = state.safety.allowed, onPick = onPick, onMore = onMore, modifier = Modifier.weight(1f))
-            if (!state.safety.allowed) {
-                Spacer(Modifier.height(Size.gap))
-                Banner(
-                    icon = Icons.Filled.Info,
-                    text = if (state.gear == GearState.UNKNOWN) "차 상태를 확인한 뒤 보낼 수 있어요"
-                    else "차를 세우고 기어를 P로 바꾸면 보낼 수 있어요",
-                    color = LocalAppColors.current.help,
-                    background = LocalAppColors.current.helpSoft,
-                )
-            }
         }
         if (showKeepWarm(state)) {
             Spacer(Modifier.height(Size.gap))
@@ -344,8 +333,8 @@ private fun SendArea(
 }
 
 /**
- * Nine messages in a 3×3 grid, then one list row to the rest. Every message sends the same way, so
- * none gets a bigger tile; the row is not a tenth tile because it opens a list instead of sending.
+ * 3×3 grid: eight messages, then "다른 상황" as the ninth cell. Every message sends the same way, so
+ * none gets a bigger cell. The ninth cell opens a list instead of sending, so it sits on grey.
  */
 @Composable
 private fun MessagePicker(
@@ -356,23 +345,29 @@ private fun MessagePicker(
     modifier: Modifier,
 ) {
     val c = LocalAppColors.current
+    val cells: List<RescueMessage?> = messages + null
     Column(modifier.alpha(if (enabled) 1f else 0.4f), verticalArrangement = Arrangement.spacedBy(Size.gap)) {
-        messages.chunked(GRID_COLUMNS).forEach { row ->
+        cells.chunked(GRID_COLUMNS).forEach { row ->
             Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
-                row.forEach { MessageTile(it, enabled, onPick, Modifier.weight(1f).fillMaxHeight()) }
+                row.forEach { message ->
+                    val cell = Modifier.weight(1f).fillMaxHeight()
+                    if (message != null) {
+                        MessageTile(message, enabled, onPick, cell)
+                    } else {
+                        Column(
+                            cell.heightIn(min = Size.tile).background(c.surface).border(1.dp, c.line)
+                                .clickable(enabled = enabled, onClick = onMore).padding(16.dp),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Icon(Icons.Filled.Apps, contentDescription = null, tint = c.ink, modifier = Modifier.size(76.dp))
+                            Spacer(Modifier.height(18.dp))
+                            Text("다른 상황", fontSize = Type.tileTitle, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 1)
+                        }
+                    }
+                }
                 repeat(GRID_COLUMNS - row.size) { Spacer(Modifier.weight(1f)) }
             }
-        }
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = 88.dp).background(c.canvas).border(1.dp, c.line)
-                .clickable(enabled = enabled, onClick = onMore).padding(horizontal = 24.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Filled.Apps, contentDescription = null, tint = c.ink, modifier = Modifier.size(36.dp))
-            Spacer(Modifier.width(16.dp))
-            Text("다른 상황", fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.ink, modifier = Modifier.weight(1f))
-            Text("${moreGroups(messages).sumOf { it.second.size }}가지", fontSize = Type.body, color = c.mute)
-            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = c.mute, modifier = Modifier.size(40.dp))
         }
     }
 }
@@ -696,12 +691,17 @@ internal fun SheetScrim(onDismiss: () -> Unit, content: @Composable () -> Unit) 
 }
 
 @Composable
-internal fun Sheet(width: Dp = 820.dp, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+internal fun Sheet(
+    width: Dp = 820.dp,
+    modifier: Modifier = Modifier,
+    padding: Dp = 32.dp,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     val c = LocalAppColors.current
     Column(
         Modifier.widthIn(max = width).fillMaxWidth(0.92f).then(modifier).background(c.canvas)
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
-            .padding(32.dp),
+            .padding(padding),
         content = content,
     )
 }
@@ -717,26 +717,29 @@ private fun ConfirmSheet(
 ) {
     val c = LocalAppColors.current
     val copy = message.copy
+    // Wide rows with room above and below: the last check before sending should not feel cramped.
+    val row = 120.dp
+    val label = 300.dp
     SheetScrim(onCancel) {
-        Sheet {
+        Sheet(width = 1200.dp, padding = 48.dp) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(copy.icon, contentDescription = null, tint = c.ink, modifier = Modifier.size(56.dp))
-                Spacer(Modifier.width(20.dp))
-                Text(copy.title, fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink)
+                Icon(copy.icon, contentDescription = null, tint = c.ink, modifier = Modifier.size(72.dp))
+                Spacer(Modifier.width(24.dp))
+                Text(copy.title, fontSize = Type.hero, fontWeight = FontWeight.ExtraBold, color = c.ink)
             }
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(36.dp))
             Divider()
             if (message.asksPeople) {
-                InfoRow("함께 있는 사람") {
+                InfoRow("함께 있는 사람", minHeight = row, labelWidth = label) {
                     Stepper(state.people, onPeople)
                 }
                 Divider()
             }
-            InfoRow("보내는 방법") {
+            InfoRow("보내는 방법", minHeight = row, labelWidth = label) {
                 Text(methodText(state, message), fontSize = Type.body, fontWeight = FontWeight.SemiBold, color = c.ink)
             }
             Divider()
-            InfoRow("내 위치") {
+            InfoRow("내 위치", minHeight = row, labelWidth = label) {
                 Text(
                     locationText(state),
                     fontSize = Type.body,
@@ -749,7 +752,7 @@ private fun ConfirmSheet(
                 }
             }
             Divider()
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(40.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
                 AppButton("취소", onCancel, Kind.SECONDARY, Modifier.weight(1f))
                 AppButton("보내기", onSend, Kind.TONE, Modifier.weight(1.6f), tone = copy.tone, enabled = state.canTransmit)
@@ -853,100 +856,130 @@ private fun CompactMessageTile(message: RescueMessage, onPick: (RescueMessage) -
     }
 }
 
+private enum class SettingsTab(val label: String, val icon: ImageVector) {
+    SEND("보내는 방법", Icons.Filled.VolumeUp),
+    RECEIVE("받은 신호", Icons.Filled.Mic),
+    INFO("차량·서버", Icons.Filled.Info),
+}
+
+/**
+ * Laid out like the Pleos settings app: sections on the left (the chosen one filled black), their
+ * switches on the right. One fixed size for every section, well short of the full screen height.
+ */
 @Composable
 private fun SettingsSheet(state: UiState, actions: ScreenActions, onClose: () -> Unit) {
     val c = LocalAppColors.current
+    var tab by remember { mutableStateOf(SettingsTab.SEND) }
     SheetScrim(onClose) {
-        Sheet(width = 980.dp) {
-            Text("설정", fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink)
-            Spacer(Modifier.height(12.dp))
-            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
-                SectionTitle("보내는 방법")
-                SwitchRow("소리로 알리기", "차 스피커로 신호음을 보내요. 근처 차량이 이 소리를 받아 글자로 보여 줘요.", state.useSound, actions.toggleSound)
-                SwitchRow(
-                    "사람이 듣는 SOS 소리",
-                    "위급한 메시지는 신호음 뒤에 '삐삐삐 삐- 삐- 삐- 삐삐삐'를 내서 앱이 없는 사람도 알아듣게 해요.",
-                    state.audibleSos,
-                    actions.toggleAudibleSos,
-                    enabled = state.useSound,
-                )
-                SwitchRow("불빛으로 알리기", "전조등을 국제 조난 신호 방식으로 깜빡여요.", state.useLight, actions.toggleLight, enabled = !state.blackout)
-                if (state.useLight && !state.blackout) {
-                    InfoRow("깜빡일 위치") {
-                        Segmented(
-                            listOf("앞" to LampGroup.FRONT, "뒤" to LampGroup.REAR, "앞뒤" to LampGroup.FRONT_AND_REAR),
-                            state.lampGroup,
-                            actions.lampGroup,
-                        )
+        Sheet(width = 1300.dp, modifier = Modifier.fillMaxHeight(0.72f)) {
+            Row(Modifier.fillMaxSize()) {
+                Column(Modifier.width(300.dp).fillMaxHeight()) {
+                    Text("설정", fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink)
+                    Spacer(Modifier.height(24.dp))
+                    SettingsTab.entries.forEach { t ->
+                        val on = t == tab
+                        Row(
+                            Modifier.fillMaxWidth().height(80.dp).background(if (on) c.ink else c.canvas)
+                                .clickable { tab = t }.padding(horizontal = 20.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(t.icon, contentDescription = null, tint = if (on) c.page else c.ink, modifier = Modifier.size(32.dp))
+                            Spacer(Modifier.width(14.dp))
+                            Text(t.label, fontSize = Type.body, fontWeight = FontWeight.SemiBold, color = if (on) c.page else c.ink)
+                        }
                     }
+                    Spacer(Modifier.weight(1f))
+                    AppButton("닫기", onClose, Kind.SECONDARY, Modifier.fillMaxWidth())
                 }
-                SwitchRow(
-                    "등화관제",
-                    "공습경보 같은 상황에서 불빛을 쓰지 않고 소리로만 보내요.",
-                    state.blackout,
-                    actions.toggleBlackout,
-                )
-                SwitchRow(
-                    "내 위치 함께 보내기",
-                    if (state.locationPermission) "구조대가 찾아올 수 있게 GPS 위치(약 40m 범위)를 같이 보내요. 보낼 때만 나가요."
-                    else "위치 권한이 없어요. 기기 설정에서 위치 권한을 허용하면 쓸 수 있어요.",
-                    state.shareLocation && state.locationPermission,
-                    actions.toggleShareLocation,
-                    enabled = state.locationPermission,
-                )
-                SectionTitle("받은 신호")
-                SwitchRow("주변 신호 듣기", "마이크로 주변 차량의 신호음을 들어요. 끄면 신호를 받을 수 없어요.", state.listening, actions.toggleListen)
-                SwitchRow("다음 차량으로 이어서 전달", "받은 신호를 잠시 뒤 내 차에서도 다시 보내 더 멀리 퍼지게 해요.", state.autoRelay, actions.toggleRelay)
-                SwitchRow(
-                    "받은 신호 음성으로 알려 주기",
-                    if (state.voiceAvailable) "화면을 보지 않아도 '가까운 차량에서 응급 환자 2명 신호를 받았어요'처럼 읽어 줘요."
-                    else "이 기기에는 한국어 음성 엔진이 없어 쓸 수 없어요.",
-                    state.voiceAnnounce && state.voiceAvailable,
-                    actions.toggleVoice,
-                    enabled = state.voiceAvailable,
-                )
-                SectionTitle("구조기관 전달")
-                InfoRow("통신이 돌아오면") {
-                    val g = state.gateway
-                    Text(
-                        when {
-                            !g.enabled -> "구조 서버가 아직 정해지지 않아 꺼져 있어요. 구조 요청 ${g.pending}건을 기기 안에 암호화해 7일간 보관해요"
-                            g.online && g.pending > 0 -> "인터넷 연결됨 · 구조 요청 ${g.pending}건을 구조 서버로 보내는 중이에요"
-                            g.online -> "인터넷 연결됨 · 보낼 구조 요청이 없어요"
-                            else -> "인터넷이 연결되면 구조 요청 ${g.pending}건을 구조 서버로 보내요"
-                        },
-                        fontSize = Type.body,
-                        color = c.ink,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                SectionTitle("시연")
-                Row(horizontalArrangement = Arrangement.spacedBy(Size.gap), modifier = Modifier.padding(vertical = 12.dp)) {
-                    AppButton("다른 차 신호 받아 보기", actions.simulateIncoming, Kind.SECONDARY, Modifier.weight(1f))
-                    if (state.vehicleMode == VehicleMode.SIMULATION) {
-                        AppButton("기어 P", { actions.setGear(GearState.PARK) }, Kind.SECONDARY, Modifier.weight(0.6f))
-                        AppButton("기어 D", { actions.setGear(GearState.DRIVE) }, Kind.SECONDARY, Modifier.weight(0.6f))
+                Spacer(Modifier.width(32.dp))
+                Box(Modifier.width(1.dp).fillMaxHeight().background(c.line))
+                Spacer(Modifier.width(32.dp))
+                Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())) {
+                    when (tab) {
+                        SettingsTab.SEND -> {
+                            SwitchRow("소리로 알리기", "차 스피커로 신호음을 보내요. 근처 차량이 글자로 받아 봐요.", state.useSound, actions.toggleSound)
+                            SwitchRow(
+                                "사람이 듣는 SOS 소리",
+                                "위급한 메시지 뒤에 누구나 알아듣는 SOS 소리를 붙여요.",
+                                state.audibleSos,
+                                actions.toggleAudibleSos,
+                                enabled = state.useSound,
+                            )
+                            SwitchRow("불빛으로 알리기", "전조등을 국제 조난 신호 방식으로 깜빡여요.", state.useLight, actions.toggleLight, enabled = !state.blackout)
+                            if (state.useLight && !state.blackout) {
+                                InfoRow("깜빡일 위치") {
+                                    Segmented(
+                                        listOf("앞" to LampGroup.FRONT, "뒤" to LampGroup.REAR, "앞뒤" to LampGroup.FRONT_AND_REAR),
+                                        state.lampGroup,
+                                        actions.lampGroup,
+                                    )
+                                }
+                            }
+                            SwitchRow("등화관제", "불빛 없이 소리로만 보내요. 공습경보 때 써요.", state.blackout, actions.toggleBlackout)
+                            SwitchRow(
+                                "내 위치 함께 보내기",
+                                if (state.locationPermission) "GPS 위치(약 40m 범위)를 같이 보내요. 보낼 때만 나가요."
+                                else "기기 설정에서 위치 권한을 허용하면 쓸 수 있어요.",
+                                state.shareLocation && state.locationPermission,
+                                actions.toggleShareLocation,
+                                enabled = state.locationPermission,
+                            )
+                        }
+                        SettingsTab.RECEIVE -> {
+                            SwitchRow("주변 신호 듣기", "마이크로 주변 차량의 신호음을 들어요.", state.listening, actions.toggleListen)
+                            SwitchRow("다음 차량으로 이어서 전달", "받은 신호를 내 차에서도 다시 보내 더 멀리 전해요.", state.autoRelay, actions.toggleRelay)
+                            SwitchRow(
+                                "음성으로 알려 주기",
+                                if (state.voiceAvailable) "받은 신호를 소리 내어 읽어 줘요." else "이 기기에는 한국어 음성 엔진이 없어요.",
+                                state.voiceAnnounce && state.voiceAvailable,
+                                actions.toggleVoice,
+                                enabled = state.voiceAvailable,
+                            )
+                            Spacer(Modifier.height(Size.gap))
+                            AppButton("다른 차 신호 받아 보기 (시연)", actions.simulateIncoming, Kind.SECONDARY, Modifier.fillMaxWidth())
+                            if (state.vehicleMode == VehicleMode.SIMULATION) {
+                                Spacer(Modifier.height(Size.gap))
+                                Row(horizontalArrangement = Arrangement.spacedBy(Size.gap)) {
+                                    AppButton("기어 P", { actions.setGear(GearState.PARK) }, Kind.SECONDARY, Modifier.weight(1f))
+                                    AppButton("기어 D", { actions.setGear(GearState.DRIVE) }, Kind.SECONDARY, Modifier.weight(1f))
+                                }
+                            }
+                        }
+                        SettingsTab.INFO -> {
+                            val g = state.gateway
+                            InfoRow("구조 서버") {
+                                Text(
+                                    when {
+                                        !g.enabled -> "정해지지 않아 꺼져 있어요 · 구조 요청 ${g.pending}건을 기기에 암호화해 7일간 보관해요"
+                                        g.online && g.pending > 0 -> "연결됨 · 구조 요청 ${g.pending}건을 보내는 중이에요"
+                                        g.online -> "연결됨 · 보낼 구조 요청이 없어요"
+                                        else -> "통신이 돌아오면 구조 요청 ${g.pending}건을 보내요"
+                                    }.keepWords(),
+                                    fontSize = Type.body,
+                                    lineHeight = Type.lines(Type.body),
+                                    color = c.ink,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            InfoRow("차량 연결") {
+                                Text(
+                                    when (state.vehicleMode) {
+                                        VehicleMode.PLEOS -> "연결됨"
+                                        VehicleMode.SIMULATION -> "연습 모드 (차량 서비스 없음)"
+                                        VehicleMode.CONNECTING -> "연결 중"
+                                    },
+                                    fontSize = Type.body,
+                                    color = c.ink,
+                                )
+                            }
+                            InfoRow("제어할 수 있는 불빛") {
+                                val writable = state.lampSupport.filterValues { it == LampSupport.WRITABLE }.keys
+                                Text(if (writable.isEmpty()) "없음" else writable.joinToString { it.label }, fontSize = Type.body, color = c.ink)
+                            }
+                        }
                     }
-                }
-                SectionTitle("차량 정보")
-                InfoRow("차량 연결") {
-                    Text(
-                        when (state.vehicleMode) {
-                            VehicleMode.PLEOS -> "연결됨"
-                            VehicleMode.SIMULATION -> "연습 모드 (차량 서비스 없음)"
-                            VehicleMode.CONNECTING -> "연결 중"
-                        },
-                        fontSize = Type.body,
-                        color = c.ink,
-                    )
-                }
-                InfoRow("제어할 수 있는 불빛") {
-                    val writable = state.lampSupport.filterValues { it == LampSupport.WRITABLE }.keys
-                    Text(if (writable.isEmpty()) "없음" else writable.joinToString { it.label }, fontSize = Type.body, color = c.ink)
                 }
             }
-            Spacer(Modifier.height(20.dp))
-            AppButton("닫기", onClose, Kind.SECONDARY, Modifier.fillMaxWidth())
         }
     }
 }
@@ -980,10 +1013,15 @@ private fun SwitchRow(title: String, detail: String, checked: Boolean, onToggle:
 }
 
 @Composable
-internal fun InfoRow(label: String, content: @Composable RowScope.() -> Unit) {
+internal fun InfoRow(
+    label: String,
+    minHeight: Dp = 96.dp,
+    labelWidth: Dp = 240.dp,
+    content: @Composable RowScope.() -> Unit,
+) {
     val c = LocalAppColors.current
-    Row(Modifier.fillMaxWidth().heightIn(min = 96.dp).padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, fontSize = Type.body, color = c.body, modifier = Modifier.width(240.dp))
+    Row(Modifier.fillMaxWidth().heightIn(min = minHeight).padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, fontSize = Type.body, color = c.body, modifier = Modifier.width(labelWidth))
         content()
     }
 }

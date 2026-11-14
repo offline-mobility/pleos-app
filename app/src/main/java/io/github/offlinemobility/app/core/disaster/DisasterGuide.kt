@@ -62,19 +62,24 @@ data class DisasterGuide(
     val blackout: Boolean,
     val sources: List<Source>,
 ) {
-    /** The nine messages on the first screen: this situation's five, then the most common of the rest. */
+    /**
+     * The eight messages on the first screen (the ninth cell opens the rest): this situation's five
+     * plus the first of [FIRST_SCREEN_ORDER] to fill up, shown in that same fixed order so a message
+     * keeps its place when the situation changes.
+     */
     val firstScreen: List<RescueMessage>
-        get() = (primary + FIRST_SCREEN_FILL).distinct().take(FIRST_SCREEN_SIZE)
+        get() = (primary + FIRST_SCREEN_ORDER).distinct().take(FIRST_SCREEN_SIZE)
+            .sortedBy { FIRST_SCREEN_ORDER.indexOf(it) }
 
     companion object {
-        const val FIRST_SCREEN_SIZE = 9
+        const val FIRST_SCREEN_SIZE = 8
 
         /**
-         * Fill order after a situation's own messages: people in danger, then needs, then road news.
-         * The generic SOS is left to the "다른 상황" list: it says less than any specific message.
+         * Order on the first screen, and the order used to fill it. The generic SOS is left to the
+         * "다른 상황" list: it says less than any specific message.
          */
-        val FIRST_SCREEN_FILL = listOf(
-            MEDICAL, TRAPPED, FIRE, FLOOD, COLD, WATER, VULNERABLE, POWER, MEDICINE, FOOD,
+        val FIRST_SCREEN_ORDER = listOf(
+            MEDICAL, POWER, TRAPPED, FIRE, FLOOD, WATER, COLD, VULNERABLE, MEDICINE, FOOD,
             RescueMessage.HAZARD, COLLAPSE, RescueMessage.CBRN, ROAD_BLOCKED, SHELTER, ROUTE_CLEAR,
             RescueMessage.RESCUE_TEAM, RescueMessage.ALL_SAFE,
         )

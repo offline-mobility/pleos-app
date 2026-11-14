@@ -1,5 +1,6 @@
 package io.github.offlinemobility.app.core
 
+import io.github.offlinemobility.app.core.disaster.DisasterGuide
 import io.github.offlinemobility.app.core.disaster.DisasterGuides
 import io.github.offlinemobility.app.core.disaster.DisasterType
 import io.github.offlinemobility.app.core.disaster.SourceKind
@@ -27,14 +28,23 @@ class DisasterGuideTest {
     }
 
     @Test
-    fun firstScreenIsNineMessagesLedByTheSituationsOwn() {
+    fun firstScreenIsEightMessagesInTheFixedOrderIncludingTheSituationsOwn() {
+        val order = DisasterGuide.FIRST_SCREEN_ORDER
         for (guide in DisasterGuides.all) {
             val first = guide.firstScreen
-            assertEquals(guide.type.name, 9, first.size)
-            assertEquals(guide.type.name, 9, first.distinct().size)
-            assertEquals(guide.type.name, guide.primary, first.take(5))
+            assertEquals(guide.type.name, 8, first.size)
+            assertEquals(guide.type.name, 8, first.distinct().size)
+            assertTrue(guide.type.name, first.containsAll(guide.primary))
+            assertTrue(guide.type.name, guide.primary.all { it in order })
+            assertEquals(guide.type.name, first.sortedBy { order.indexOf(it) }, first)
             assertTrue(guide.type.name, RescueMessage.SOS !in first && RescueMessage.ACK !in first)
         }
+        val general = listOf(
+            RescueMessage.MEDICAL, RescueMessage.POWER, RescueMessage.TRAPPED, RescueMessage.FIRE,
+            RescueMessage.FLOOD, RescueMessage.WATER, RescueMessage.COLD, RescueMessage.VULNERABLE,
+        )
+        assertEquals(general, DisasterGuides.of(DisasterType.GENERAL).firstScreen)
+        assertEquals(general, DisasterGuides.of(DisasterType.HEAT).firstScreen)
     }
 
     @Test
