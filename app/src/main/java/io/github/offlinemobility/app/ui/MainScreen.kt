@@ -41,6 +41,8 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VolumeUp
@@ -81,6 +83,7 @@ import io.github.offlinemobility.app.core.disaster.DisasterType
 import io.github.offlinemobility.app.core.disaster.WindowAdvice
 import io.github.offlinemobility.app.core.light.Lamp
 import io.github.offlinemobility.app.core.online.OfficialAlert
+import io.github.offlinemobility.app.core.online.Shelter
 import io.github.offlinemobility.app.core.online.ShelterFinder
 import io.github.offlinemobility.app.core.light.LampGroup
 import io.github.offlinemobility.app.core.light.LightPattern
@@ -119,7 +122,10 @@ class ScreenActions(
     val retryVehicle: () -> Unit,
 )
 
-private enum class Overlay { NONE, CONFIRM, MORE, SETTINGS, DISASTER, GUIDE, SHELTERS, KEEP_WARM, RELAY }
+private enum class Overlay { NONE, CONFIRM, MORE, SETTINGS, DISASTER, GUIDE, SHELTERS, KEEP_WARM, RELAY, INBOX, SHELTER, SIGNAL }
+
+/** A received signal pops up over the map only while it is this fresh. */
+private const val POPUP_WINDOW_MS = 10 * 60_000L
 
 @Composable
 fun MainScreen(state: UiState, actions: ScreenActions) {
@@ -128,6 +134,10 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
     var pending by remember { mutableStateOf<RescueMessage?>(null) }
     // True when the guide was opened from the situation list, so "이전" can go back to it.
     var guideFromList by remember { mutableStateOf(false) }
+    var shelterPick by remember { mutableStateOf<Shelter?>(null) }
+    var signalPick by remember { mutableStateOf<Long?>(null) }
+    // Signals closed in the pop-up or seen in the list do not pop up again.
+    val seen = remember { mutableStateListOf<Long>() }
     val now by produceState(System.currentTimeMillis()) {
         while (true) {
             delay(15_000)
@@ -147,12 +157,50 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
         guideFromList = false
         overlay = Overlay.GUIDE
     }
+    val signals = state.receivedSignals()
+    val fresh = signals.filter { it.id !in seen && now - it.receivedAtMs < POPUP_WINDOW_MS }
+    val openInbox: () -> Unit = {
+        seen.addAll(signals.map { it.id })
+        overlay = Overlay.INBOX
+    }
+    val rightSide: @Composable (Modifier) -> Unit = { modifier ->
+        Box(modifier) {
+            AroundMapPanel(
+                state,
+                onShelter = {
+                    shelterPick = it
+                    overlay = Overlay.SHELTER
+                },
+                onSignal = {
+                    signalPick = it.id
+                    seen.add(it.id)
+                    overlay = Overlay.SIGNAL
+                },
+                onShelterList = { overlay = Overlay.SHELTERS },
+                modifier = Modifier.fillMaxSize(),
+            )
+            fresh.firstOrNull()?.let { item ->
+                SignalPopup(
+                    item = state.shown(item),
+                    more = fresh.size - 1,
+                    now = now,
+                    myFix = state.myFix,
+                    canReply = state.safety.allowed && !state.tx.active,
+                    onReply = { actions.acknowledge(item) },
+                    onClose = { seen.add(item.id) },
+                    onAll = openInbox,
+                    modifier = Modifier.align(Alignment.TopCenter).padding(12.dp).fillMaxWidth(),
+                )
+            }
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(c.page)) {
         Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 20.dp)) {
             Header(
                 state,
-                onShelters = { overlay = Overlay.SHELTERS },
+                received = signals.size,
+                onInbox = openInbox,
                 onDisaster = { overlay = Overlay.DISASTER },
                 onSettings = { overlay = Overlay.SETTINGS },
             )
@@ -161,12 +209,12 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
                 if (maxWidth > maxHeight) {
                     Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                         SendArea(state, actions, now, pick, onMore = { overlay = Overlay.MORE }, onGuide = openGuide, onKeepWarm = { overlay = Overlay.KEEP_WARM }, onRelay = { overlay = Overlay.RELAY }, Modifier.weight(1.15f).fillMaxHeight())
-                        InboxArea(state, actions, now, Modifier.weight(0.85f).fillMaxHeight())
+                        rightSide(Modifier.weight(0.85f).fillMaxHeight())
                     }
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         SendArea(state, actions, now, pick, onMore = { overlay = Overlay.MORE }, onGuide = openGuide, onKeepWarm = { overlay = Overlay.KEEP_WARM }, onRelay = { overlay = Overlay.RELAY }, Modifier.weight(0.58f).fillMaxWidth())
-                        InboxArea(state, actions, now, Modifier.weight(0.42f).fillMaxWidth())
+                        rightSide(Modifier.weight(0.42f).fillMaxWidth())
                     }
                 }
             }
@@ -205,6 +253,11 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
             Overlay.SETTINGS -> SettingsSheet(state, actions, onClose = { overlay = Overlay.NONE })
             Overlay.KEEP_WARM -> KeepWarmSheet(state, actions, onClose = { overlay = Overlay.NONE })
             Overlay.RELAY -> RelaySheet(state.tx, onClose = { overlay = Overlay.NONE })
+            Overlay.INBOX -> InboxSheet(state, actions, now, onClose = { overlay = Overlay.NONE })
+            Overlay.SHELTER -> shelterPick?.let { ShelterDetailSheet(it, state.myFix, onClose = { overlay = Overlay.NONE }) }
+            Overlay.SIGNAL -> state.inbox.firstOrNull { it.id == signalPick }?.let {
+                SignalSheet(state, it, actions, now, onClose = { overlay = Overlay.NONE })
+            }
             Overlay.NONE -> Unit
         }
     }
@@ -213,7 +266,7 @@ fun MainScreen(state: UiState, actions: ScreenActions) {
 // ---------------------------------------------------------------- header
 
 @Composable
-private fun Header(state: UiState, onShelters: () -> Unit, onDisaster: () -> Unit, onSettings: () -> Unit) {
+private fun Header(state: UiState, received: Int, onInbox: () -> Unit, onDisaster: () -> Unit, onSettings: () -> Unit) {
     val c = LocalAppColors.current
     Row(Modifier.fillMaxWidth().heightIn(min = Size.secondaryButton), verticalAlignment = Alignment.CenterVertically) {
         // Left: what to do, and below it in small type whether sending works. Right: only things to press.
@@ -222,10 +275,14 @@ private fun Header(state: UiState, onShelters: () -> Unit, onDisaster: () -> Uni
             Text(statusLine(state, c), fontSize = Type.meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.width(16.dp))
-        if (state.online.shelters.isNotEmpty()) {
-            AppButton("대피소", onShelters, Kind.SECONDARY, height = Size.secondaryButton, icon = Icons.Filled.Home)
-            Spacer(Modifier.width(12.dp))
-        }
+        AppButton(
+            if (received > 0) "받은 신호 $received" else "받은 신호",
+            onInbox,
+            Kind.SECONDARY,
+            height = Size.secondaryButton,
+            icon = Icons.Filled.Notifications,
+        )
+        Spacer(Modifier.width(12.dp))
         AppButton(
             if (state.disaster == DisasterType.GENERAL) "행동요령" else "${state.disaster.label} 행동요령",
             onDisaster,
@@ -258,6 +315,7 @@ private fun statusLine(state: UiState, c: AppColors): AnnotatedString = buildAnn
         strong = false,
     )
     if (state.vehicleMode == VehicleMode.SIMULATION) item("연습 모드", c.body, strong = false)
+    if (!state.listening) item("듣기 꺼짐", c.urgent)
     if (state.gateway.enabled && !state.gateway.online) item("통신 끊김 · 소리와 빛으로 보내요", c.urgent)
     if (state.blackout) item("등화관제 중", c.ink)
     state.endurance?.takeIf { it.low }?.let { e -> item("${if (e.isEv) "배터리" else "연료"} ${e.percent}% 남음", c.urgent) }
@@ -548,132 +606,167 @@ private fun sendNote(state: UiState): String = when {
 
 // ---------------------------------------------------------------- inbox
 
+/** The received signal with whether this car already handed it to the rescue server. */
+private fun UiState.shown(item: InboxItem): InboxItem =
+    item.copy(forwarded = "%02x-%x".format(item.frame.senderId, item.frame.sequence) in gateway.lastUploadedKeys)
+
+/** Every received signal, opened from the header; the map and the pop-up show them as they come. */
 @Composable
-private fun InboxArea(state: UiState, actions: ScreenActions, now: Long, modifier: Modifier) {
+private fun InboxSheet(state: UiState, actions: ScreenActions, now: Long, onClose: () -> Unit) {
     val c = LocalAppColors.current
-    val items = state.inbox.filter { it.kind == InboxKind.NEW || it.kind == InboxKind.SERVER }
-    Column(
-        modifier.clip(RoundedCornerShape(Size.radius)).background(c.surface).padding(20.dp),
-    ) {
-        // Listening is a state, not something people change here: plain words, switched in 설정.
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("주변에서 온 신호", fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.ink)
-            if (items.isNotEmpty()) {
-                Spacer(Modifier.width(10.dp))
-                Text("${items.size}", fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.ink)
-            }
-            Spacer(Modifier.weight(1f))
-            Icon(
-                if (state.listening) Icons.Filled.Mic else Icons.Filled.MicOff,
-                contentDescription = null,
-                tint = if (state.listening) c.mute else c.urgent,
-                modifier = Modifier.size(28.dp),
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                if (state.listening) "듣는 중" else "듣기 꺼짐",
-                fontSize = Type.meta,
-                color = if (state.listening) c.mute else c.urgent,
-            )
-        }
-        state.micMessage?.let {
-            Spacer(Modifier.height(10.dp))
-            Text(it, fontSize = Type.meta, color = c.help)
-        }
-        Spacer(Modifier.height(Size.gap))
-        if (items.isEmpty()) {
-            Column(
-                Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Icon(if (state.listening) Icons.Filled.Mic else Icons.Filled.MicOff, contentDescription = null, tint = c.mute, modifier = Modifier.size(56.dp))
-                Spacer(Modifier.height(12.dp))
-                Text("아직 받은 신호가 없어요", fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.body)
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    if (!state.listening) "듣기가 꺼져 있어요 · 설정에서 켤 수 있어요"
-                    else when (state.guide.window) {
-                        WindowAdvice.OPEN_A_LITTLE -> "주변 차량의 신호를 듣고 있어요\n창문을 조금 열면 더 멀리서도 들려요"
-                        WindowAdvice.KEEP_CLOSED -> "주변 차량의 신호를 듣고 있어요\n지금은 창문을 닫아 두세요 · 들리는 거리는 줄어요"
-                        WindowAdvice.NO_ADVICE -> "주변 차량의 신호를 듣고 있어요"
-                    },
-                    fontSize = Type.meta,
-                    color = c.mute,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+    val items = state.receivedSignals()
+    SheetScrim(onClose) {
+        Sheet(width = 1100.dp, modifier = Modifier.fillMaxHeight(0.8f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("받은 신호", fontSize = Type.display, fontWeight = FontWeight.ExtraBold, color = c.ink, modifier = Modifier.weight(1f))
+                Icon(
+                    if (state.listening) Icons.Filled.Mic else Icons.Filled.MicOff,
+                    contentDescription = null,
+                    tint = if (state.listening) c.mute else c.urgent,
+                    modifier = Modifier.size(28.dp),
                 )
+                Spacer(Modifier.width(6.dp))
+                Text(if (state.listening) "듣는 중" else "듣기 꺼짐", fontSize = Type.meta, color = if (state.listening) c.mute else c.urgent)
             }
-        } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(items, key = { it.id }) { item ->
-                    InboxCard(item.copy(forwarded = "%02x-%x".format(item.frame.senderId, item.frame.sequence) in state.gateway.lastUploadedKeys), now, state.myFix, canReply = state.safety.allowed && !state.tx.active) { actions.acknowledge(item) }
+            state.micMessage?.let {
+                Spacer(Modifier.height(10.dp))
+                Text(it, fontSize = Type.meta, color = c.urgent)
+            }
+            Spacer(Modifier.height(Size.gap))
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                if (items.isEmpty()) {
+                    Column(
+                        Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text("아직 받은 신호가 없어요", fontSize = Type.title, fontWeight = FontWeight.Bold, color = c.body)
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            if (!state.listening) "듣기가 꺼져 있어요 · 설정에서 켤 수 있어요"
+                            else when (state.guide.window) {
+                                WindowAdvice.OPEN_A_LITTLE -> "주변 차량의 신호를 듣고 있어요 · 창문을 조금 열면 더 멀리서도 들려요"
+                                WindowAdvice.KEEP_CLOSED -> "주변 차량의 신호를 듣고 있어요 · 지금은 창문을 닫아 두세요"
+                                WindowAdvice.NO_ADVICE -> "주변 차량의 신호를 듣고 있어요"
+                            },
+                            fontSize = Type.body,
+                            color = c.mute,
+                        )
+                    }
+                } else {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(items, key = { it.id }) { item ->
+                            InboxCard(state.shown(item), now, state.myFix, canReply = state.safety.allowed && !state.tx.active, onReply = { actions.acknowledge(item) })
+                        }
+                    }
                 }
             }
+            Spacer(Modifier.height(20.dp))
+            AppButton("닫기", onClose, Kind.SECONDARY, Modifier.fillMaxWidth())
         }
     }
 }
 
+/** One received signal tapped on the map. */
 @Composable
-private fun InboxCard(item: InboxItem, now: Long, myFix: Fix?, canReply: Boolean, onReply: () -> Unit) {
+private fun SignalSheet(state: UiState, item: InboxItem, actions: ScreenActions, now: Long, onClose: () -> Unit) {
+    SheetScrim(onClose) {
+        Sheet(width = 1000.dp, padding = 0.dp) {
+            InboxCard(state.shown(item), now, state.myFix, canReply = state.safety.allowed && !state.tx.active, onReply = { actions.acknowledge(item) }, onClose = onClose)
+        }
+    }
+}
+
+/**
+ * @param onClose shown as a 닫기 button when the card stands alone (pop-up, tapped on the map).
+ * @param framed false inside a frame that already has an outline.
+ */
+@Composable
+internal fun InboxCard(
+    item: InboxItem,
+    now: Long,
+    myFix: Fix?,
+    canReply: Boolean,
+    onReply: () -> Unit,
+    onClose: (() -> Unit)? = null,
+    framed: Boolean = true,
+) {
     val c = LocalAppColors.current
     val copy = item.frame.message.copy
     val fromServer = item.kind == InboxKind.SERVER
+    val canAnswer = item.frame.message != RescueMessage.ACK && !fromServer
     // Reading order for someone deciding whether to go and help: what and how many, where, then how it got here.
-    // The only colour is the red icon of an urgent request, so those stand out in the list.
-    Row(
-        Modifier.fillMaxWidth().background(c.canvas).border(1.dp, c.line).padding(20.dp),
-        verticalAlignment = Alignment.Top,
+    // The only colour is the red icon of an urgent request, so those stand out.
+    Column(
+        Modifier.fillMaxWidth().background(c.canvas)
+            .let { if (framed) it.border(1.dp, c.line) else it }
+            .padding(20.dp),
     ) {
-        Icon(copy.icon, contentDescription = null, tint = copy.tone.strong(), modifier = Modifier.size(44.dp))
-        Spacer(Modifier.width(16.dp))
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.Top) {
-                Text(
-                    titleWithPeople(item.frame.message, item.frame.people),
-                    fontSize = Type.title,
-                    lineHeight = Type.lines(Type.title),
-                    fontWeight = FontWeight.Bold,
-                    color = c.ink,
-                    modifier = Modifier.weight(1f),
+        Row(verticalAlignment = Alignment.Top) {
+            Icon(copy.icon, contentDescription = null, tint = copy.tone.strong(), modifier = Modifier.size(44.dp))
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.Top) {
+                    Text(
+                        titleWithPeople(item.frame.message, item.frame.people),
+                        fontSize = Type.title,
+                        lineHeight = Type.lines(Type.title),
+                        fontWeight = FontWeight.Bold,
+                        color = c.ink,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(relativeTime(item.receivedAtMs, now), fontSize = Type.meta, color = c.mute, modifier = Modifier.padding(top = 6.dp))
+                }
+                Spacer(Modifier.height(6.dp))
+                val where = whereText(item.frame, myFix)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Place, contentDescription = null, tint = if (where != null) c.ink else c.mute, modifier = Modifier.size(28.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        where ?: "위치는 받지 못했어요",
+                        fontSize = Type.body,
+                        fontWeight = if (where != null) FontWeight.Bold else FontWeight.Normal,
+                        color = if (where != null) c.ink else c.mute,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                // How it got here. A server item says nothing about the route; only a count of two or more
+                // reporting cars adds anything.
+                val route = listOfNotNull(
+                    if (fromServer) "차량 ${item.confirmations}대가 알림".takeIf { item.confirmations >= 2 } else routeText(item.frame.hop),
+                    "내 차도 이어서 전달했어요".takeIf { item.relayState == RelayState.SENT },
+                    "구조 서버로 전달했어요".takeIf { item.forwarded && !fromServer },
                 )
-                Spacer(Modifier.width(12.dp))
-                Text(relativeTime(item.receivedAtMs, now), fontSize = Type.meta, color = c.mute, modifier = Modifier.padding(top = 6.dp))
-            }
-            Spacer(Modifier.height(6.dp))
-            val where = whereText(item.frame, myFix)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Place, contentDescription = null, tint = if (where != null) c.ink else c.mute, modifier = Modifier.size(28.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    where ?: "위치는 받지 못했어요",
-                    fontSize = Type.body,
-                    fontWeight = if (where != null) FontWeight.Bold else FontWeight.Normal,
-                    color = if (where != null) c.ink else c.mute,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            // How it got here. A server item says nothing about the route; only a count of two or more
-            // reporting cars adds anything.
-            val route = listOfNotNull(
-                if (fromServer) "차량 ${item.confirmations}대가 알림".takeIf { item.confirmations >= 2 } else routeText(item.frame.hop),
-                "내 차도 이어서 전달했어요".takeIf { item.relayState == RelayState.SENT },
-                "구조 서버로 전달했어요".takeIf { item.forwarded && !fromServer },
-            )
-            if (route.isNotEmpty()) {
-                Spacer(Modifier.height(4.dp))
-                Text(route.joinToString(" · ").keepWords(), fontSize = Type.meta, color = c.body)
-            }
-            if (item.frame.message != RescueMessage.ACK && !fromServer) {
-                Spacer(Modifier.height(14.dp))
-                if (item.acknowledged) {
+                if (route.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(route.joinToString(" · ").keepWords(), fontSize = Type.meta, color = c.body)
+                }
+                if (canAnswer && item.acknowledged) {
+                    Spacer(Modifier.height(10.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Check, contentDescription = null, tint = c.ink, modifier = Modifier.size(28.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("응답했어요", fontSize = Type.meta, fontWeight = FontWeight.SemiBold, color = c.ink)
                     }
-                } else {
-                    AppButton("받았다고 알리기", onReply, Kind.SECONDARY, Modifier.fillMaxWidth(), height = 64.dp, enabled = canReply)
+                }
+            }
+        }
+        val reply = canAnswer && !item.acknowledged
+        if (reply || onClose != null) {
+            Spacer(Modifier.height(16.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (onClose != null) AppButton("닫기", onClose, Kind.SECONDARY, Modifier.weight(1f), height = 72.dp)
+                if (reply) {
+                    AppButton(
+                        "받았다고 알리기",
+                        onReply,
+                        if (onClose != null) Kind.STRONG_NEUTRAL else Kind.SECONDARY,
+                        Modifier.weight(if (onClose != null) 1.6f else 1f),
+                        height = 72.dp,
+                        enabled = canReply,
+                    )
                 }
             }
         }
