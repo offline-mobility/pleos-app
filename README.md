@@ -1,11 +1,11 @@
-# 북극성
+# 폴라리스
 
 차 밖으로 나갈 수 없어 차 안에서 오래 기다려야 할 때 쓰는 Pleos Connect 차량용 앱입니다.
 차량 에너지를 아껴 더 오래 버티게 하고, 통신이 끊겨도 도움 요청을 차에서 차로 이어 전달합니다.
 
 | 항목 | 내용 |
 |---|---|
-| 제출용 APK | [`apk/카우듀오_북극성_release.apk`](apk/카우듀오_북극성_release.apk) |
+| 제출용 APK | [`apk/카우듀오_폴라리스_release.apk`](apk/카우듀오_폴라리스_release.apk) |
 | 에뮬레이터 | Pleos Connect Emulator v2.1.0 (API 34) |
 | 화면 규격 | 2560×1440, 160dpi, 가로 |
 
@@ -47,7 +47,7 @@
 ### APK 설치
 
 ```bash
-adb install "apk/카우듀오_북극성_release.apk"
+adb install "apk/카우듀오_폴라리스_release.apk"
 ```
 
 처음 실행할 때 마이크·위치·알림 권한을 허용합니다.
