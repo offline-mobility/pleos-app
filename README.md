@@ -5,7 +5,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 제출용 APK | [`apk/카우듀오_폴라리스_release.apk`](apk/카우듀오_폴라리스_release.apk) |
+| 제출용 APK | [`apk/패트와매트_폴라리스_release.apk`](apk/패트와매트_폴라리스_release.apk) |
 | 에뮬레이터 | Pleos Connect Emulator v2.1.0 (API 34) |
 | 화면 규격 | 2560×1440, 160dpi, 가로 |
 
@@ -47,7 +47,7 @@
 ### APK 설치
 
 ```bash
-adb install "apk/카우듀오_폴라리스_release.apk"
+adb install "apk/패트와매트_폴라리스_release.apk"
 ```
 
 처음 실행할 때 마이크·위치·알림 권한을 허용합니다.
